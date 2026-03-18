@@ -1,0 +1,26 @@
+[
+  {
+    "name": "single_deposit",
+    "operations": [
+      {"action": "deposit", "amount": 1000, "date": "01/04/2014"}
+    ],
+    "expected_statement": [
+      "DATE       | AMOUNT  | BALANCE",
+      "01/04/2014 | 1000.00 | 1000.00"
+    ]
+  },
+  {
+    "name": "full_statement",
+    "operations": [
+      {"action": "deposit", "amount": 1000, "date": "01/04/2014"},
+      {"action": "withdraw", "amount": 100, "date": "02/04/2014"},
+      {"action": "deposit", "amount": 500, "date": "10/04/2014"}
+    ],
+    "expected_statement": [
+      "DATE       | AMOUNT  | BALANCE",
+      "10/04/2014 | 500.00 | 1400.00",
+      "02/04/2014 | -100.00 | 900.00",
+      "01/04/2014 | 1000.00 | 1000.00"
+    ]
+  }
+]

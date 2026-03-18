@@ -1,0 +1,44 @@
+[
+  {
+    "name": "single_character_returns_nothing",
+    "query": "A",
+    "expected": []
+  },
+  {
+    "name": "prefix_match",
+    "query": "Va",
+    "expected": ["Valencia", "Vancouver"]
+  },
+  {
+    "name": "case_insensitive_prefix",
+    "query": "va",
+    "expected": ["Valencia", "Vancouver"]
+  },
+  {
+    "name": "substring_match",
+    "query": "ape",
+    "expected": ["Budapest"]
+  },
+  {
+    "name": "asterisk_returns_all",
+    "query": "*",
+    "expected": [
+      "Paris",
+      "Budapest",
+      "Skopje",
+      "Rotterdam",
+      "Valencia",
+      "Vancouver",
+      "Amsterdam",
+      "Vienna",
+      "Sydney",
+      "New York City",
+      "London",
+      "Bangkok",
+      "Hong Kong",
+      "Dubai",
+      "Rome",
+      "Istanbul"
+    ]
+  }
+]

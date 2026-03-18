@@ -1,0 +1,34 @@
+[
+  {
+    "name": "valid_single_barcode",
+    "steps": [
+      {"input": "12345", "expected": "$7.25"}
+    ]
+  },
+  {
+    "name": "unknown_barcode",
+    "steps": [
+      {"input": "00000", "expected": "Error: barcode not found"}
+    ]
+  },
+  {
+    "name": "empty_barcode",
+    "steps": [
+      {"input": "", "expected": "Error: empty barcode"}
+    ]
+  },
+  {
+    "name": "total_after_multiple_scans",
+    "steps": [
+      {"input": "12345", "expected": "$7.25"},
+      {"input": "23456", "expected": "$12.50"},
+      {"input": "total", "expected": "Total: $19.75"}
+    ]
+  },
+  {
+    "name": "total_without_items",
+    "steps": [
+      {"input": "total", "expected": "Total: $0.00"}
+    ]
+  }
+]
