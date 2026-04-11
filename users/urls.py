@@ -7,6 +7,7 @@ from .views import (
     BadgeupTokenObtainPairView,
     GoogleCallbackView,
     GoogleLoginStartView,
+    GoogleMobileLoginView,
     LeaderboardView,
     ProfileView,
     PublicUserProfileView,
@@ -24,4 +25,5 @@ urlpatterns = [
     path("users/<int:pk>/admin/delete/", AdminUserDeleteView.as_view(), name="user-admin-delete"),
     path("google/login/", GoogleLoginStartView.as_view(), name="google-login"),
     path("google/callback/", GoogleCallbackView.as_view(), name="google-callback"),
+    path("google/mobile/", GoogleMobileLoginView.as_view(), name="google-mobile"),
 ]

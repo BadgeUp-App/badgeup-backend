@@ -49,6 +49,16 @@ class BadgeupTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
 
     def validate(self, attrs):
+        # Allow the "username" field to actually contain an email. If an email
+        # is received, swap it for the matching username before delegating to
+        # the parent validator.
+        username_value = attrs.get(self.username_field, "")
+        if isinstance(username_value, str) and "@" in username_value:
+            try:
+                user = User.objects.get(email__iexact=username_value)
+                attrs[self.username_field] = user.username
+            except User.DoesNotExist:
+                pass
         data = super().validate(attrs)
         data["user"] = UserSerializer(self.user).data
         return data
@@ -163,6 +173,86 @@ class GoogleCallbackView(APIView):
             f"&refresh={refresh}"
         )
         return redirect(frontend_login_url)
+
+
+class GoogleMobileLoginView(APIView):
+    """
+    Accepts an OAuth access_token obtained by the mobile app via google_sign_in
+    and exchanges it for a BadgeUp JWT pair. The token is validated against
+    Google's userinfo endpoint.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        access_token = request.data.get("access_token")
+        if not access_token:
+            return Response(
+                {"detail": "access_token is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        userinfo_resp = requests.get(
+            "https://openidconnect.googleapis.com/v1/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        if userinfo_resp.status_code != 200:
+            return Response(
+                {"detail": "Invalid Google access token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        profile = userinfo_resp.json()
+        email = profile.get("email")
+        if not email:
+            return Response(
+                {"detail": "Google account has no email."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        given_name = profile.get("given_name") or ""
+        family_name = profile.get("family_name") or ""
+        picture = profile.get("picture")
+        email = email.lower()
+
+        base_username = email.split("@")[0]
+        username = base_username
+        idx = 1
+        while (
+            User.objects.filter(username=username)
+            .exclude(email=email)
+            .exists()
+        ):
+            idx += 1
+            username = f"{base_username}{idx}"
+
+        user, created = User.objects.get_or_create(
+            email=email,
+            defaults={
+                "username": username,
+                "first_name": given_name,
+                "last_name": family_name,
+            },
+        )
+
+        if picture and not user.avatar:
+            try:
+                user.avatar = picture
+                user.save(update_fields=["avatar"])
+            except Exception:
+                pass
+
+        refresh = RefreshToken.for_user(user)
+        return Response(
+            {
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+                "user": UserSerializer(user).data,
+                "created": created,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class PublicUserProfileView(generics.RetrieveAPIView):

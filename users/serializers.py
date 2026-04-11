@@ -10,6 +10,7 @@ User = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
     computed_points = serializers.SerializerMethodField()
+    reset_avatar = serializers.BooleanField(write_only=True, required=False)
 
     class Meta:
         model = User
@@ -25,6 +26,7 @@ class UserSerializer(serializers.ModelSerializer):
             "computed_points",
             "date_joined",
             "is_staff",
+            "reset_avatar",
         )
         read_only_fields = ("id", "points", "computed_points", "date_joined")
 
@@ -32,6 +34,9 @@ class UserSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not request or not request.user.is_staff:
             validated_data.pop("is_staff", None)
+        reset_avatar = validated_data.pop("reset_avatar", False)
+        if reset_avatar:
+            instance.avatar = None
         return super().update(instance, validated_data)
 
     def get_computed_points(self, obj):
