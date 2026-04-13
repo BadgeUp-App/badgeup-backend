@@ -1,0 +1,738 @@
+[
+{
+  "model": "albums.album",
+  "pk": 2,
+  "fields": {
+    "title": "Deportivos",
+    "description": "Los superdeportivos mas veloces y exclusivos del mundo. De Maranello a Sant Agata, las maquinas que definen la velocidad.",
+    "theme": "deportivos",
+    "cover_image": "covers/cover_deportivos.png",
+    "is_premium": false,
+    "price": "0.00",
+    "created_at": "2026-04-13T00:46:11.489Z",
+    "updated_at": "2026-04-13T00:46:11.489Z"
+  }
+},
+{
+  "model": "albums.album",
+  "pk": 3,
+  "fields": {
+    "title": "Buchones",
+    "description": "Trocas y camionetas con estilo. Las bestias del asfalto que imponen presencia a donde llegan.",
+    "theme": "buchones",
+    "cover_image": "covers/cover_buchones.png",
+    "is_premium": false,
+    "price": "0.00",
+    "created_at": "2026-04-13T00:46:11.491Z",
+    "updated_at": "2026-04-13T00:46:11.491Z"
+  }
+},
+{
+  "model": "albums.album",
+  "pk": 4,
+  "fields": {
+    "title": "Clasicos",
+    "description": "Joyas de epoca que marcaron la historia del automovil. Diseños que nunca pasan de moda.",
+    "theme": "clasicos",
+    "cover_image": "covers/cover_clasicos.png",
+    "is_premium": false,
+    "price": "0.00",
+    "created_at": "2026-04-13T00:46:11.491Z",
+    "updated_at": "2026-04-13T00:46:11.491Z"
+  }
+},
+{
+  "model": "albums.album",
+  "pk": 5,
+  "fields": {
+    "title": "Japoneses",
+    "description": "El JDM en su maxima expresion. Desde los iconicos drift cars hasta los muscle japoneses mas cotizados.",
+    "theme": "japoneses",
+    "cover_image": "covers/cover_japoneses.png",
+    "is_premium": false,
+    "price": "0.00",
+    "created_at": "2026-04-13T00:46:11.492Z",
+    "updated_at": "2026-04-13T00:46:11.492Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 2,
+  "fields": {
+    "album": 2,
+    "name": "Ferrari F40",
+    "description": "El ultimo Ferrari disenado bajo la supervision de Enzo. Motor V8 biturbo, 478 hp.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/deportivos_ferrari_f40.png",
+    "reward_points": 500,
+    "order": 1,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.493Z",
+    "updated_at": "2026-04-13T00:46:11.493Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 3,
+  "fields": {
+    "album": 2,
+    "name": "Lamborghini Countach",
+    "description": "El poster de los 80. Puertas tijera, lineas angulares y un V12 que grita.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/deportivos_lamborghini_countach.png",
+    "reward_points": 350,
+    "order": 2,
+    "rarity": "epico",
+    "created_at": "2026-04-13T00:46:11.493Z",
+    "updated_at": "2026-04-13T00:46:11.493Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 4,
+  "fields": {
+    "album": 2,
+    "name": "Porsche 911 GT3 RS",
+    "description": "El 911 llevado al extremo. Aerodinamica activa y motor aspirado que gira a 9000 rpm.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/deportivos_porsche_911_gt3_rs.png",
+    "reward_points": 350,
+    "order": 3,
+    "rarity": "epico",
+    "created_at": "2026-04-13T00:46:11.494Z",
+    "updated_at": "2026-04-13T00:46:11.494Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 5,
+  "fields": {
+    "album": 2,
+    "name": "McLaren P1",
+    "description": "Hibrido hypercar. 916 hp combinados de un V8 biturbo y motor electrico.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/deportivos_mclaren_p1.png",
+    "reward_points": 500,
+    "order": 4,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.494Z",
+    "updated_at": "2026-04-13T00:46:11.494Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 6,
+  "fields": {
+    "album": 2,
+    "name": "Bugatti Chiron",
+    "description": "Cuatro turbos, 1500 hp, 420 km/h. El rey absoluto de la velocidad.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/deportivos_bugatti_chiron.png",
+    "reward_points": 600,
+    "order": 5,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.495Z",
+    "updated_at": "2026-04-13T00:46:11.495Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 7,
+  "fields": {
+    "album": 2,
+    "name": "Ferrari 488 Pista",
+    "description": "La version de pista del 488. V8 biturbo de 720 hp con aerodinamica de competicion.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/deportivos_ferrari_488_pista.png",
+    "reward_points": 250,
+    "order": 6,
+    "rarity": "raro",
+    "created_at": "2026-04-13T00:46:11.495Z",
+    "updated_at": "2026-04-13T00:46:11.495Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 8,
+  "fields": {
+    "album": 2,
+    "name": "Lamborghini Huracan STO",
+    "description": "Derivado de la Super Trofeo. V10 aspirado, 640 hp y sin compromiso.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/deportivos_lamborghini_huracan_sto.png",
+    "reward_points": 350,
+    "order": 7,
+    "rarity": "epico",
+    "created_at": "2026-04-13T00:46:11.496Z",
+    "updated_at": "2026-04-13T00:46:11.496Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 9,
+  "fields": {
+    "album": 2,
+    "name": "Porsche 918 Spyder",
+    "description": "Hibrido de Porsche que rompio el record de Nurburgring. V8 + electricos = 887 hp.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/deportivos_porsche_918_spyder.png",
+    "reward_points": 500,
+    "order": 8,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.496Z",
+    "updated_at": "2026-04-13T00:46:11.496Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 10,
+  "fields": {
+    "album": 2,
+    "name": "Aston Martin Valkyrie",
+    "description": "Disenado con Red Bull Racing. Motor V12 Cosworth de 1160 hp. Formula 1 para la calle.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/deportivos_aston_martin_valkyrie.png",
+    "reward_points": 600,
+    "order": 9,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.496Z",
+    "updated_at": "2026-04-13T00:46:11.496Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 11,
+  "fields": {
+    "album": 2,
+    "name": "Koenigsegg Jesko",
+    "description": "Motor V8 biturbo de 1600 hp con E85. Busca ser el primer auto en superar 330 mph.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/deportivos_koenigsegg_jesko.png",
+    "reward_points": 600,
+    "order": 10,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.496Z",
+    "updated_at": "2026-04-13T00:46:11.496Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 12,
+  "fields": {
+    "album": 3,
+    "name": "RAM TRX",
+    "description": "Pickup con motor Hellcat V8 sobrealimentado de 702 hp. La bestia del desierto.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/buchones_ram_trx.png",
+    "reward_points": 350,
+    "order": 1,
+    "rarity": "epico",
+    "created_at": "2026-04-13T00:46:11.497Z",
+    "updated_at": "2026-04-13T00:46:11.497Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 13,
+  "fields": {
+    "album": 3,
+    "name": "Ford Lobo Raptor R",
+    "description": "V8 sobrealimentado de 700 hp en una pickup. Suspension de largo recorrido.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/buchones_ford_lobo_raptor_r.png",
+    "reward_points": 350,
+    "order": 2,
+    "rarity": "epico",
+    "created_at": "2026-04-13T00:46:11.497Z",
+    "updated_at": "2026-04-13T00:46:11.497Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 14,
+  "fields": {
+    "album": 3,
+    "name": "Chevrolet Cheyenne High Country",
+    "description": "La Cheyenne tope de linea. Lujo, potencia y presencia en cada detalle.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/buchones_chevrolet_cheyenne.png",
+    "reward_points": 250,
+    "order": 3,
+    "rarity": "raro",
+    "created_at": "2026-04-13T00:46:11.497Z",
+    "updated_at": "2026-04-13T00:46:11.497Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 15,
+  "fields": {
+    "album": 3,
+    "name": "GMC Sierra Denali",
+    "description": "Elegancia y fuerza. La Denali con su V8 de 420 hp y acabados premium.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/buchones_gmc_sierra_denali.png",
+    "reward_points": 250,
+    "order": 4,
+    "rarity": "raro",
+    "created_at": "2026-04-13T00:46:11.497Z",
+    "updated_at": "2026-04-13T00:46:11.497Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 16,
+  "fields": {
+    "album": 3,
+    "name": "Toyota Tundra TRD Pro",
+    "description": "Motor V6 biturbo hibrido de 437 hp. Confiabilidad Toyota en formato bestia.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/buchones_toyota_tundra_trd_pro.png",
+    "reward_points": 300,
+    "order": 5,
+    "rarity": "epico",
+    "created_at": "2026-04-13T00:46:11.498Z",
+    "updated_at": "2026-04-13T00:46:11.498Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 17,
+  "fields": {
+    "album": 3,
+    "name": "Ford Bronco Raptor",
+    "description": "V6 EcoBoost de 418 hp con suspension de 13 pulgadas de recorrido. Off-road extremo.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/buchones_ford_bronco_raptor.png",
+    "reward_points": 300,
+    "order": 6,
+    "rarity": "epico",
+    "created_at": "2026-04-13T00:46:11.498Z",
+    "updated_at": "2026-04-13T00:46:11.498Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 18,
+  "fields": {
+    "album": 3,
+    "name": "Cadillac Escalade V",
+    "description": "V8 sobrealimentado de 682 hp en una SUV de lujo. El jefe de los buchones.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/buchones_cadillac_escalade_v.png",
+    "reward_points": 500,
+    "order": 7,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.498Z",
+    "updated_at": "2026-04-13T00:46:11.498Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 19,
+  "fields": {
+    "album": 3,
+    "name": "Jeep Wrangler Rubicon 392",
+    "description": "V8 HEMI de 470 hp en el Wrangler. El Jeep mas agresivo jamas hecho.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/buchones_jeep_wrangler_rubicon.png",
+    "reward_points": 250,
+    "order": 8,
+    "rarity": "raro",
+    "created_at": "2026-04-13T00:46:11.498Z",
+    "updated_at": "2026-04-13T00:46:11.498Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 20,
+  "fields": {
+    "album": 3,
+    "name": "Chevrolet Suburban RST",
+    "description": "La nave nodriza. Espacio para toda la familia y motor V8 de 420 hp.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/buchones_chevrolet_suburban_rst.png",
+    "reward_points": 100,
+    "order": 9,
+    "rarity": "comun",
+    "created_at": "2026-04-13T00:46:11.499Z",
+    "updated_at": "2026-04-13T00:46:11.499Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 21,
+  "fields": {
+    "album": 3,
+    "name": "Lincoln Navigator Black Label",
+    "description": "Lujo americano en su maxima expresion. V6 biturbo de 440 hp.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/buchones_lincoln_navigator.png",
+    "reward_points": 250,
+    "order": 10,
+    "rarity": "raro",
+    "created_at": "2026-04-13T00:46:11.499Z",
+    "updated_at": "2026-04-13T00:46:11.499Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 22,
+  "fields": {
+    "album": 4,
+    "name": "Ford Mustang 1967 Fastback",
+    "description": "El Mustang de Bullitt. V8 390 ci, lineas que definieron una era.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/clasicos_ford_mustang_1967.png",
+    "reward_points": 500,
+    "order": 1,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.500Z",
+    "updated_at": "2026-04-13T00:46:11.500Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 23,
+  "fields": {
+    "album": 4,
+    "name": "Chevrolet Corvette Stingray 1963",
+    "description": "El split-window Vette. Considerado el Corvette mas bello jamas hecho.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/clasicos_chevrolet_corvette_1963.png",
+    "reward_points": 500,
+    "order": 2,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.500Z",
+    "updated_at": "2026-04-13T00:46:11.500Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 24,
+  "fields": {
+    "album": 4,
+    "name": "Porsche 356 Speedster",
+    "description": "El primer Porsche de produccion. Ligero, agil y hermoso en su simplicidad.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/clasicos_porsche_356_speedster.png",
+    "reward_points": 350,
+    "order": 3,
+    "rarity": "epico",
+    "created_at": "2026-04-13T00:46:11.500Z",
+    "updated_at": "2026-04-13T00:46:11.500Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 25,
+  "fields": {
+    "album": 4,
+    "name": "Jaguar E-Type",
+    "description": "Enzo Ferrari lo llamo el auto mas bello jamas hecho. Lineas que inspiran hasta hoy.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/clasicos_jaguar_e_type.png",
+    "reward_points": 500,
+    "order": 4,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.500Z",
+    "updated_at": "2026-04-13T00:46:11.500Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 26,
+  "fields": {
+    "album": 4,
+    "name": "Mercedes-Benz 300 SL Gullwing",
+    "description": "Puertas de ala de gaviota y motor de inyeccion directa. Icono absoluto.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/clasicos_mercedes_300sl_gullwing.png",
+    "reward_points": 600,
+    "order": 5,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.501Z",
+    "updated_at": "2026-04-13T00:46:11.501Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 27,
+  "fields": {
+    "album": 4,
+    "name": "Volkswagen Sedan (Vocho)",
+    "description": "El carro del pueblo. Mas de 21 millones producidos. Simbolo de una era.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/clasicos_volkswagen_vocho.png",
+    "reward_points": 100,
+    "order": 6,
+    "rarity": "comun",
+    "created_at": "2026-04-13T00:46:11.501Z",
+    "updated_at": "2026-04-13T00:46:11.501Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 28,
+  "fields": {
+    "album": 4,
+    "name": "Chevrolet Bel Air 1957",
+    "description": "Alerones cromados y colores pastel. El clasico americano por excelencia.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/clasicos_chevrolet_bel_air_1957.png",
+    "reward_points": 350,
+    "order": 7,
+    "rarity": "epico",
+    "created_at": "2026-04-13T00:46:11.501Z",
+    "updated_at": "2026-04-13T00:46:11.501Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 29,
+  "fields": {
+    "album": 4,
+    "name": "Ford GT40",
+    "description": "Gano Le Mans 4 veces seguidas. Creado para vencer a Ferrari. Y lo logro.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/clasicos_ford_gt40.png",
+    "reward_points": 600,
+    "order": 8,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.501Z",
+    "updated_at": "2026-04-13T00:46:11.501Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 30,
+  "fields": {
+    "album": 4,
+    "name": "Pontiac GTO 1969",
+    "description": "El muscle car original. V8 de 400 ci que abrio la era del poder americano.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/clasicos_pontiac_gto_1969.png",
+    "reward_points": 350,
+    "order": 9,
+    "rarity": "epico",
+    "created_at": "2026-04-13T00:46:11.501Z",
+    "updated_at": "2026-04-13T00:46:11.501Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 31,
+  "fields": {
+    "album": 4,
+    "name": "BMW 2002 Turbo",
+    "description": "El primer turbo europeo de produccion. Inicio la leyenda BMW en performance.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/clasicos_bmw_2002_turbo.png",
+    "reward_points": 250,
+    "order": 10,
+    "rarity": "raro",
+    "created_at": "2026-04-13T00:46:11.502Z",
+    "updated_at": "2026-04-13T00:46:11.502Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 32,
+  "fields": {
+    "album": 5,
+    "name": "Nissan Skyline GT-R R34",
+    "description": "Godzilla. El RB26DETT biturbo y la traccion ATTESA hicieron historia.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/japoneses_nissan_skyline_r34.png",
+    "reward_points": 500,
+    "order": 1,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.502Z",
+    "updated_at": "2026-04-13T00:46:11.502Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 33,
+  "fields": {
+    "album": 5,
+    "name": "Toyota Supra MK4",
+    "description": "El 2JZ-GTE es uno de los motores mas tuneables jamas hechos. Icono de Fast and Furious.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/japoneses_toyota_supra_mk4.png",
+    "reward_points": 500,
+    "order": 2,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.502Z",
+    "updated_at": "2026-04-13T00:46:11.502Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 34,
+  "fields": {
+    "album": 5,
+    "name": "Mazda RX-7 FD",
+    "description": "Motor rotativo 13B-REW biturbo. Diseño que sigue siendo moderno 30 anos despues.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/japoneses_mazda_rx7_fd.png",
+    "reward_points": 350,
+    "order": 3,
+    "rarity": "epico",
+    "created_at": "2026-04-13T00:46:11.503Z",
+    "updated_at": "2026-04-13T00:46:11.503Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 35,
+  "fields": {
+    "album": 5,
+    "name": "Honda NSX (NA1)",
+    "description": "Disenado con ayuda de Ayrton Senna. El supercar japones que humillo a Ferrari.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/japoneses_honda_nsx_na1.png",
+    "reward_points": 500,
+    "order": 4,
+    "rarity": "legendario",
+    "created_at": "2026-04-13T00:46:11.503Z",
+    "updated_at": "2026-04-13T00:46:11.503Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 36,
+  "fields": {
+    "album": 5,
+    "name": "Subaru Impreza WRX STI",
+    "description": "Boxer turbo y AWD. Campeon de rally y rey de las touge.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/japoneses_subaru_wrx_sti.png",
+    "reward_points": 350,
+    "order": 5,
+    "rarity": "epico",
+    "created_at": "2026-04-13T00:46:11.504Z",
+    "updated_at": "2026-04-13T00:46:11.504Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 37,
+  "fields": {
+    "album": 5,
+    "name": "Mitsubishi Lancer Evolution IX",
+    "description": "El eterno rival del STI. Motor 4G63 turbo de 286 hp y la mejor traccion integral.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/japoneses_mitsubishi_evo_ix.png",
+    "reward_points": 350,
+    "order": 6,
+    "rarity": "epico",
+    "created_at": "2026-04-13T00:46:11.504Z",
+    "updated_at": "2026-04-13T00:46:11.504Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 38,
+  "fields": {
+    "album": 5,
+    "name": "Honda Civic Type R (EK9)",
+    "description": "VTEC kicked in yo. El B16B a 8400 rpm es musica pura.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/japoneses_honda_civic_type_r_ek9.png",
+    "reward_points": 250,
+    "order": 7,
+    "rarity": "raro",
+    "created_at": "2026-04-13T00:46:11.504Z",
+    "updated_at": "2026-04-13T00:46:11.504Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 39,
+  "fields": {
+    "album": 5,
+    "name": "Toyota AE86 Sprinter Trueno",
+    "description": "El drift king. Initial D lo hizo leyenda. Motor 4A-GE aspirado.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/japoneses_toyota_ae86.png",
+    "reward_points": 250,
+    "order": 8,
+    "rarity": "raro",
+    "created_at": "2026-04-13T00:46:11.505Z",
+    "updated_at": "2026-04-13T00:46:11.505Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 40,
+  "fields": {
+    "album": 5,
+    "name": "Nissan 370Z Nismo",
+    "description": "V6 de 350 hp, chasis balanceado. Deportivo japones accesible y divertido.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/japoneses_nissan_370z_nismo.png",
+    "reward_points": 100,
+    "order": 9,
+    "rarity": "comun",
+    "created_at": "2026-04-13T00:46:11.505Z",
+    "updated_at": "2026-04-13T00:46:11.505Z"
+  }
+},
+{
+  "model": "albums.sticker",
+  "pk": 41,
+  "fields": {
+    "album": 5,
+    "name": "Mazda MX-5 Miata (NA)",
+    "description": "Ligero, simple y puro. El roadster que salvo el concepto del sports car accesible.",
+    "location_lat": null,
+    "location_lng": null,
+    "image_reference": "stickers/japoneses_mazda_mx5_miata.png",
+    "reward_points": 100,
+    "order": 10,
+    "rarity": "comun",
+    "created_at": "2026-04-13T00:46:11.507Z",
+    "updated_at": "2026-04-13T00:46:11.507Z"
+  }
+}
+]
