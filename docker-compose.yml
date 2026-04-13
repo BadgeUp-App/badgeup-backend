@@ -11,8 +11,9 @@ services:
     env_file:
       - .env
     depends_on:
-      - db
       - redis
+    networks:
+      - backend
 
   db:
     image: postgres:15
@@ -22,9 +23,13 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-badgeup_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
 
   redis:
     image: redis:alpine
+    networks:
+      - backend
 
   celery:
     build: .
@@ -36,6 +41,17 @@ services:
     depends_on:
       - web
       - redis
+    networks:
+      - backend
+
+networks:
+  backend:
+    enable_ipv6: true
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "172.28.0.0/16"
+        - subnet: "fd00:dead:beef::/48"
 
 volumes:
   postgres_data:
