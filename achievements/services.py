@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import os
 from typing import Any, Dict, Iterable, Optional
 
 from django.conf import settings
@@ -111,7 +112,7 @@ def analyze_car_photo(photo_file, stickers: Iterable[Sticker]) -> dict[str, Any]
 
     try:
         completion = client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_msg},
@@ -195,7 +196,7 @@ def analyze_user_sticker(user_sticker: UserSticker) -> dict[str, Any]:
 
     try:
         response = client.responses.create(
-            model="gpt-4.1-mini",
+            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
             input=[
                 {
                     "role": "user",

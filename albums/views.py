@@ -1,3 +1,5 @@
+import os
+
 from django.conf import settings
 from django.db.models import F
 from django.shortcuts import get_object_or_404
@@ -186,7 +188,7 @@ class MatchAlbumPhotoView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        if confidence < 0.6:
+        if confidence < float(os.getenv("MIN_VALIDATION_CONFIDENCE", "0.6")):
             return Response(
                 {
                     "unlocked": False,
