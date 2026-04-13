@@ -1,9 +1,13 @@
+import random
+from datetime import timedelta
+
 import requests
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.shortcuts import redirect
 from django.db.models import Q, Sum
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -277,3 +281,97 @@ class AdminUserManageView(generics.UpdateAPIView):
 class AdminUserDeleteView(generics.DestroyAPIView):
     permission_classes = [permissions.IsAdminUser]
     queryset = User.objects.all()
+
+
+class PasswordResetRequestView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        email = (request.data.get("email") or "").strip().lower()
+        generic_msg = "Si el correo existe, se envio un codigo de recuperacion."
+        if not email:
+            return Response({"detail": generic_msg}, status=status.HTTP_200_OK)
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"detail": generic_msg}, status=status.HTTP_200_OK)
+
+        if not user.has_usable_password():
+            return Response({"detail": generic_msg}, status=status.HTTP_200_OK)
+
+        code = f"{random.randint(0, 999999):06d}"
+        user.reset_code = code
+        user.reset_code_expires = timezone.now() + timedelta(minutes=15)
+        user.save(update_fields=["reset_code", "reset_code_expires"])
+        print(f"[PASSWORD RESET] {email} -> code: {code}")
+        return Response({"detail": generic_msg}, status=status.HTTP_200_OK)
+
+
+class PasswordResetConfirmView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        email = (request.data.get("email") or "").strip().lower()
+        code = (request.data.get("code") or "").strip()
+        new_password = request.data.get("new_password") or ""
+
+        if not email or not code or not new_password:
+            return Response(
+                {"detail": "Faltan campos requeridos."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response(
+                {"detail": "Codigo invalido o expirado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if (
+            not user.reset_code
+            or user.reset_code != code
+            or not user.reset_code_expires
+            or user.reset_code_expires < timezone.now()
+        ):
+            return Response(
+                {"detail": "Codigo invalido o expirado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.set_password(new_password)
+        user.reset_code = None
+        user.reset_code_expires = None
+        user.save(update_fields=["password", "reset_code", "reset_code_expires"])
+        return Response(
+            {"detail": "Contrasena actualizada."},
+            status=status.HTTP_200_OK,
+        )
+
+
+class ChangePasswordView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        old_password = request.data.get("old_password") or ""
+        new_password = request.data.get("new_password") or ""
+
+        if not old_password or not new_password:
+            return Response(
+                {"detail": "Faltan campos requeridos."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not request.user.check_password(old_password):
+            return Response(
+                {"detail": "La contrasena actual es incorrecta."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        request.user.set_password(new_password)
+        request.user.save(update_fields=["password"])
+        return Response(
+            {"detail": "Contrasena actualizada."},
+            status=status.HTTP_200_OK,
+        )

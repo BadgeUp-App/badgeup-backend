@@ -12,6 +12,9 @@ class User(AbstractUser):
     bio = models.TextField(blank=True)
     points = models.PositiveIntegerField(default=0)
 
+    reset_code = models.CharField(max_length=6, blank=True, null=True)
+    reset_code_expires = models.DateTimeField(blank=True, null=True)
+
     REQUIRED_FIELDS = ["email"]
 
     def __str__(self) -> str:
