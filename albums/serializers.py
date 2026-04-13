@@ -113,6 +113,7 @@ class StickerLocationSerializer(serializers.ModelSerializer):
     sticker_id = serializers.IntegerField(source="sticker.id", read_only=True)
     sticker_name = serializers.CharField(source="sticker.name", read_only=True)
     album_title = serializers.CharField(source="sticker.album.title", read_only=True)
+    rarity = serializers.CharField(source="sticker.rarity", read_only=True)
     username = serializers.CharField(source="user.username", read_only=True)
 
     class Meta:
@@ -122,10 +123,12 @@ class StickerLocationSerializer(serializers.ModelSerializer):
             "sticker_id",
             "sticker_name",
             "album_title",
+            "rarity",
             "username",
             "unlocked_at",
             "location_lat",
             "location_lng",
+            "location_label",
         )
 
 

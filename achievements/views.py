@@ -297,3 +297,30 @@ class UserStickerHistoryView(generics.ListAPIView):
             .select_related("sticker__album")
             .order_by("-unlocked_at")
         )
+
+
+class StickerLocationsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        qs = (
+            UserSticker.objects
+            .filter(status=UserSticker.STATUS_APPROVED)
+            .exclude(location_lat__isnull=True)
+            .exclude(location_lng__isnull=True)
+            .select_related("sticker__album", "user")
+        )
+        results = []
+        for us in qs:
+            results.append({
+                "id": us.id,
+                "sticker_name": us.sticker.name,
+                "album_title": us.sticker.album.title if us.sticker.album else "",
+                "rarity": us.sticker.rarity,
+                "username": us.user.username,
+                "lat": float(us.location_lat),
+                "lng": float(us.location_lng),
+                "location_label": us.location_label or "",
+                "unlocked_at": us.unlocked_at.isoformat() if us.unlocked_at else "",
+            })
+        return Response(results)

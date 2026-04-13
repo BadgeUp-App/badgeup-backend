@@ -303,6 +303,17 @@ class PasswordResetRequestView(APIView):
         user.reset_code = code
         user.reset_code_expires = timezone.now() + timedelta(minutes=15)
         user.save(update_fields=["reset_code", "reset_code_expires"])
+        try:
+            from django.core.mail import send_mail
+            send_mail(
+                "BadgeUp - Codigo de recuperacion",
+                f"Tu codigo de recuperacion es: {code}\n\nExpira en 15 minutos.",
+                settings.DEFAULT_FROM_EMAIL,
+                [email],
+                fail_silently=True,
+            )
+        except Exception:
+            pass
         print(f"[PASSWORD RESET] {email} -> code: {code}")
         return Response({"detail": generic_msg}, status=status.HTTP_200_OK)
 
