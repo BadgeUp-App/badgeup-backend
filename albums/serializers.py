@@ -51,6 +51,8 @@ class StickerSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return False
+        if request.user.is_staff:
+            return True
         return obj.user_stickers.filter(
             user=request.user,
             status=UserSticker.STATUS_APPROVED,
