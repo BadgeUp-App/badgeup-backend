@@ -18,5 +18,3 @@ staticfiles/
 
 # OS files
 .DS_Store
-
-badgeup/settings.py
