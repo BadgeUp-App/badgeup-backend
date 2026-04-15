@@ -283,8 +283,8 @@ class FirebaseLoginView(APIView):
                     else "Token de Firebase invalido."
                 )
             }
-            if settings.DEBUG and err:
-                payload["debug"] = err
+            if err:
+                payload["reason"] = err
             return Response(
                 payload,
                 status=(
