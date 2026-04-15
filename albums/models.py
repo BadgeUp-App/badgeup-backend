@@ -33,6 +33,7 @@ class Album(models.Model):
         blank=True,
         null=True,
     )
+    tags = models.CharField(max_length=500, blank=True, default="")
     is_premium = models.BooleanField(default=False)
     price = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

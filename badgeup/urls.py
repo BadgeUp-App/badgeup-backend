@@ -19,11 +19,14 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from albums.views import GlobalScanView
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/", include("users.urls")),
     path("api/albums/", include("albums.urls")),
     path("api/stickers/", include("albums.sticker_urls")),
+    path("api/scan/", GlobalScanView.as_view(), name="global-scan"),
     path("api/", include("achievements.urls")),
 ]
 

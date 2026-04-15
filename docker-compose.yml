@@ -10,7 +10,10 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    extra_hosts:
+      - "db.bsfuqekuppqanpmehceo.supabase.co:2600:1f18:2e13:9d4e:f9c8:a054:81d9:c298"
     depends_on:
+      - db
       - redis
     networks:
       - backend
@@ -38,6 +41,8 @@ services:
       - .:/app
     env_file:
       - .env
+    extra_hosts:
+      - "db.bsfuqekuppqanpmehceo.supabase.co:2600:1f18:2e13:9d4e:f9c8:a054:81d9:c298"
     depends_on:
       - web
       - redis

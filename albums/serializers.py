@@ -134,6 +134,7 @@ class StickerLocationSerializer(serializers.ModelSerializer):
 
 class AlbumSerializer(serializers.ModelSerializer):
     stickers_count = serializers.IntegerField(source="stickers.count", read_only=True)
+    unlocked_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Album
@@ -143,10 +144,22 @@ class AlbumSerializer(serializers.ModelSerializer):
             "description",
             "theme",
             "cover_image",
+            "tags",
             "is_premium",
             "price",
             "stickers_count",
+            "unlocked_count",
         )
+
+    def get_unlocked_count(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return 0
+        return UserSticker.objects.filter(
+            user=request.user,
+            sticker__album=obj,
+            status=UserSticker.STATUS_APPROVED,
+        ).count()
 
 
 class AlbumDetailSerializer(AlbumSerializer):
@@ -164,6 +177,7 @@ class AlbumCreateSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "theme",
+            "tags",
             "cover_image",
             "is_premium",
             "price",

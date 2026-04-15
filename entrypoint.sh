@@ -7,25 +7,43 @@ if [ "$1" = "celery" ]; then
   RUN_MIGRATIONS="false"
 fi
 
+SUPABASE_OK=false
 if [ -n "$DATABASE_URL" ]; then
-  echo "Conectando a BD remota (Supabase)..."
-  until python -c "
-import dj_database_url, psycopg2
-cfg = dj_database_url.parse('$DATABASE_URL')
-psycopg2.connect(host=cfg['HOST'], port=cfg['PORT'], dbname=cfg['NAME'], user=cfg['USER'], password=cfg['PASSWORD']).close()
-" 2>/dev/null; do
-    echo "  esperando..."
+  echo "Intentando BD remota (Supabase)..."
+  TRIES=0
+  MAX_TRIES=5
+  while [ $TRIES -lt $MAX_TRIES ]; do
+    if python -c "
+import psycopg2, os
+psycopg2.connect(os.environ['DATABASE_URL'], connect_timeout=5).close()
+" 2>/dev/null; then
+      SUPABASE_OK=true
+      break
+    fi
+    TRIES=$((TRIES + 1))
+    echo "  intento $TRIES/$MAX_TRIES..."
     sleep 2
   done
-else
-  DB_HOST="${POSTGRES_HOST:-db}"
-  DB_PORT="${POSTGRES_PORT:-5432}"
-  echo "Esperando BD local ($DB_HOST:$DB_PORT)..."
-  while ! nc -z "$DB_HOST" "$DB_PORT"; do
-    sleep 1
-  done
 fi
-echo "Base conectada."
+
+if [ "$SUPABASE_OK" = "true" ]; then
+  echo "Conectado a Supabase."
+else
+  if [ "$DATABASE_FALLBACK" = "true" ]; then
+    echo "Supabase no disponible, usando BD local..."
+    unset DATABASE_URL
+    DB_HOST="${POSTGRES_HOST:-db}"
+    DB_PORT="${POSTGRES_PORT:-5432}"
+    echo "Esperando BD local ($DB_HOST:$DB_PORT)..."
+    while ! nc -z "$DB_HOST" "$DB_PORT"; do
+      sleep 1
+    done
+    echo "BD local conectada."
+  else
+    echo "Supabase no disponible y fallback desactivado."
+    exit 1
+  fi
+fi
 
 if [ "$RUN_MIGRATIONS" = "true" ]; then
   if [ -z "$DATABASE_URL" ]; then
@@ -39,16 +57,6 @@ if [ "$RUN_MIGRATIONS" = "true" ]; then
 
   echo "Aplicando migraciones..."
   python manage.py migrate --noinput
-
-  echo "Verificando superusuarios..."
-  python manage.py shell <<'PY'
-from django.contrib.auth import get_user_model
-User = get_user_model()
-if not User.objects.filter(username="admin").exists():
-    User.objects.create_superuser("admin", "admin@example.com", "admin")
-if not User.objects.filter(username="adminfc").exists():
-    User.objects.create_superuser("adminfc", "adminfc@example.com", "admin")
-PY
 
   python manage.py collectstatic --noinput >/dev/null 2>&1 || true
 fi

@@ -147,6 +147,103 @@ def analyze_car_photo(photo_file, stickers: Iterable[Sticker]) -> dict[str, Any]
     return data
 
 
+def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
+    if not settings.USE_OPENAI_STICKER_VALIDATION:
+        return {"error": "validacion por IA deshabilitada"}
+
+    try:
+        client = get_openai_client()
+    except Exception:
+        logger.exception("No se pudo inicializar el cliente de OpenAI")
+        return None
+
+    try:
+        raw = photo_file.read()
+        b64 = base64.b64encode(raw).decode("utf-8")
+    except Exception:
+        logger.exception("No se pudo leer la foto del usuario")
+        return None
+    finally:
+        try:
+            photo_file.seek(0)
+        except Exception:
+            pass
+
+    catalog_lines = []
+    for album in albums_qs:
+        tags = album.tags or album.theme or ""
+        sticker_list = "\n".join(
+            f"  - ID {s.id}: {s.name} -- {s.description or ''}"
+            for s in album.stickers.all()
+        )
+        catalog_lines.append(
+            f"Album ID {album.id}: \"{album.title}\" [tags: {tags}]\nStickers:\n{sticker_list}"
+        )
+    catalog_text = "\n\n".join(catalog_lines) or "No hay albums disponibles."
+
+    system_msg = (
+        "Eres un experto en reconocimiento visual. Recibes UNA foto y un catalogo de albums con stickers.\n"
+        "Cada album tiene tags que describen su contenido y una lista de stickers con nombres.\n\n"
+        "Tu tarea:\n"
+        "1. Identifica que hay en la foto (vehiculo, animal, edificio, objeto, etc.).\n"
+        "2. Busca en que album(s) podria encajar segun los tags.\n"
+        "3. Si encuentras un sticker que coincida, devuelve su ID.\n"
+        "4. Si detectas algo pero no hay sticker, dilo claramente.\n\n"
+        "Responde SIEMPRE un JSON valido con este esquema EXACTO:\n"
+        "{\n"
+        '  "recognized": boolean,\n'
+        '  "detected_item": string|null,\n'
+        '  "detected_category": string|null,\n'
+        '  "confidence": number,\n'
+        '  "album_id": number|null,\n'
+        '  "sticker_id": number|null,\n'
+        '  "reason": string,\n'
+        '  "fun_fact": string\n'
+        "}\n"
+        "Si NO reconoces nada, usa recognized=false, confidence=0, y un mensaje amigable en fun_fact."
+    )
+
+    user_text = (
+        f"Catalogo de albums y stickers:\n{catalog_text}\n\n"
+        "Analiza la foto y devuelve SOLO el JSON, sin texto extra."
+    )
+
+    try:
+        completion = client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_msg},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                        },
+                    ],
+                },
+            ],
+            max_tokens=500,
+        )
+        raw_content = completion.choices[0].message.content or "{}"
+        data = json.loads(raw_content)
+    except Exception:
+        logger.exception("No se pudo parsear JSON de OpenAI (global scan)")
+        return None
+
+    data.setdefault("recognized", False)
+    data.setdefault("detected_item", None)
+    data.setdefault("detected_category", None)
+    data.setdefault("confidence", 0.0)
+    data.setdefault("album_id", None)
+    data.setdefault("sticker_id", None)
+    data.setdefault("reason", "")
+    data.setdefault("fun_fact", "")
+    return data
+
+
 def analyze_user_sticker(user_sticker: UserSticker) -> dict[str, Any]:
     """
     Validate a user sticker submission using OpenAI Vision when enabled.

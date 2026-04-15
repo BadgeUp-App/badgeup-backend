@@ -236,8 +236,27 @@ class MemberListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        users = User.objects.exclude(id=request.user.id)
-        serializer = MemberSerializer(users, many=True, context={"request": request})
+        user = request.user
+        users = User.objects.exclude(id=user.id)
+
+        friend_requests = FriendRequest.objects.filter(
+            models.Q(from_user=user) | models.Q(to_user=user)
+        ).exclude(status=FriendRequest.STATUS_REJECTED)
+
+        relationship_map = {}
+        for fr in friend_requests:
+            if fr.status == FriendRequest.STATUS_ACCEPTED:
+                other_id = fr.to_user_id if fr.from_user_id == user.id else fr.from_user_id
+                relationship_map[other_id] = {"status": "friends", "request_id": fr.id}
+            elif fr.status == FriendRequest.STATUS_PENDING:
+                if fr.from_user_id == user.id:
+                    relationship_map[fr.to_user_id] = {"status": "request_sent", "request_id": fr.id}
+                else:
+                    relationship_map[fr.from_user_id] = {"status": "request_received", "request_id": fr.id}
+
+        serializer = MemberWithRelationSerializer(
+            users, many=True, context={"request": request, "relationship_map": relationship_map}
+        )
         return Response(serializer.data)
 
 
@@ -293,7 +312,8 @@ class UserStickerHistoryView(generics.ListAPIView):
 
     def get_queryset(self):
         return (
-            UserSticker.objects.filter(user=self.request.user, status=UserSticker.STATUS_APPROVED)
+            UserSticker.objects.filter(user=self.request.user)
+            .exclude(status=UserSticker.STATUS_REJECTED)
             .select_related("sticker__album")
             .order_by("-unlocked_at")
         )
