@@ -273,11 +273,25 @@ class FirebaseLoginView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        decoded = firebase_verify_id_token(id_token)
+        decoded, err = firebase_verify_id_token(id_token)
         if not decoded:
+            is_config = err and err.startswith("Firebase no configurado")
+            payload = {
+                "detail": (
+                    "Firebase no esta configurado en el servidor."
+                    if is_config
+                    else "Token de Firebase invalido."
+                )
+            }
+            if settings.DEBUG and err:
+                payload["debug"] = err
             return Response(
-                {"detail": "Token de Firebase invalido."},
-                status=status.HTTP_401_UNAUTHORIZED,
+                payload,
+                status=(
+                    status.HTTP_503_SERVICE_UNAVAILABLE
+                    if is_config
+                    else status.HTTP_401_UNAUTHORIZED
+                ),
             )
 
         email = (decoded.get("email") or "").lower()

@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import threading
-from typing import Optional
+from typing import Optional, Tuple
 
 import firebase_admin
 from firebase_admin import auth as firebase_auth
@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 _init_lock = threading.Lock()
 _initialized = False
+_init_error: Optional[str] = None
 
 
 def _load_credentials():
@@ -27,22 +28,25 @@ def _load_credentials():
     return None
 
 
-def ensure_initialized():
-    global _initialized
+def ensure_initialized() -> Tuple[bool, Optional[str]]:
+    global _initialized, _init_error
     if _initialized:
-        return True
+        return True, None
 
     with _init_lock:
         if _initialized:
-            return True
+            return True, None
 
         try:
             cred = _load_credentials()
             if cred is None:
-                logger.warning(
-                    "Firebase no configurado: falta FIREBASE_CREDENTIALS_PATH o FIREBASE_CREDENTIALS_JSON"
+                msg = (
+                    "Firebase no configurado: faltan FIREBASE_CREDENTIALS_PATH "
+                    "o FIREBASE_CREDENTIALS_JSON en el entorno."
                 )
-                return False
+                logger.warning(msg)
+                _init_error = msg
+                return False, msg
 
             try:
                 firebase_admin.initialize_app(cred)
@@ -50,17 +54,22 @@ def ensure_initialized():
                 pass
 
             _initialized = True
-            return True
+            _init_error = None
+            return True, None
         except Exception as exc:
-            logger.exception("No se pudo inicializar Firebase Admin: %s", exc)
-            return False
+            msg = f"No se pudo inicializar Firebase Admin: {exc}"
+            logger.exception(msg)
+            _init_error = msg
+            return False, msg
 
 
-def verify_id_token(token: str) -> Optional[dict]:
-    if not ensure_initialized():
-        return None
+def verify_id_token(token: str) -> Tuple[Optional[dict], Optional[str]]:
+    ok, err = ensure_initialized()
+    if not ok:
+        return None, err
     try:
-        return firebase_auth.verify_id_token(token)
+        return firebase_auth.verify_id_token(token), None
     except Exception as exc:
-        logger.info("ID token invalido: %s", exc)
-        return None
+        msg = f"{type(exc).__name__}: {exc}"
+        logger.info("ID token invalido: %s", msg)
+        return None, msg
