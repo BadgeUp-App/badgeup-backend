@@ -61,8 +61,10 @@ if [ "$RUN_MIGRATIONS" = "true" ]; then
   python manage.py collectstatic --noinput >/dev/null 2>&1 || true
 fi
 
+APP_PORT="${PORT:-8000}"
+
 if [ "$#" -eq 0 ] || [ "$1" = "gunicorn" ]; then
-  set -- uvicorn badgeup.asgi:application --host 0.0.0.0 --port 8000 --ws websockets
+  set -- uvicorn badgeup.asgi:application --host 0.0.0.0 --port "$APP_PORT" --ws websockets
 fi
 
 echo "Levantando: $*"
