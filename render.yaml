@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: badgeup-backend
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/
+    envVars:
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: ".onrender.com,badgeup-backend.onrender.com"
+      - key: DJANGO_CSRF_TRUSTED_ORIGINS
+        value: "https://badgeup-backend.onrender.com"
+      - key: DJANGO_TIME_ZONE
+        value: UTC
+      - key: DATABASE_FALLBACK
+        value: "false"
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://badgeup-backend.onrender.com"
+      - key: ACCESS_TOKEN_LIFETIME_MINUTES
+        value: "60"
+      - key: REFRESH_TOKEN_LIFETIME_DAYS
+        value: "7"
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: FRONTEND_URL
+        value: "https://badgeup-backend.onrender.com"
+      - key: DEFAULT_FROM_EMAIL
+        value: "BadgeUp <ferchavez2027@gmail.com>"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
