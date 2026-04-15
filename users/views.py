@@ -17,6 +17,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 
 from achievements.models import UserSticker
 
+from .firebase_backend import verify_id_token as firebase_verify_id_token
 from .serializers import (
     AdminUserManageSerializer,
     PublicUserProfileSerializer,
@@ -219,6 +220,82 @@ class GoogleMobileLoginView(APIView):
         family_name = profile.get("family_name") or ""
         picture = profile.get("picture")
         email = email.lower()
+
+        base_username = email.split("@")[0]
+        username = base_username
+        idx = 1
+        while (
+            User.objects.filter(username=username)
+            .exclude(email=email)
+            .exists()
+        ):
+            idx += 1
+            username = f"{base_username}{idx}"
+
+        user, created = User.objects.get_or_create(
+            email=email,
+            defaults={
+                "username": username,
+                "first_name": given_name,
+                "last_name": family_name,
+            },
+        )
+
+        if picture and not user.avatar:
+            try:
+                user.avatar = picture
+                user.save(update_fields=["avatar"])
+            except Exception:
+                pass
+
+        refresh = RefreshToken.for_user(user)
+        return Response(
+            {
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+                "user": UserSerializer(user).data,
+                "created": created,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class FirebaseLoginView(APIView):
+    """Recibe un ID token de Firebase y devuelve un par de tokens BadgeUp."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        id_token = request.data.get("id_token")
+        if not id_token:
+            return Response(
+                {"detail": "id_token es requerido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        decoded = firebase_verify_id_token(id_token)
+        if not decoded:
+            return Response(
+                {"detail": "Token de Firebase invalido."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        email = (decoded.get("email") or "").lower()
+        if not email:
+            return Response(
+                {"detail": "La cuenta de Firebase no tiene email."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        name = decoded.get("name") or ""
+        given_name = ""
+        family_name = ""
+        if name:
+            parts = name.strip().split(" ", 1)
+            given_name = parts[0]
+            family_name = parts[1] if len(parts) > 1 else ""
+
+        picture = decoded.get("picture")
 
         base_username = email.split("@")[0]
         username = base_username

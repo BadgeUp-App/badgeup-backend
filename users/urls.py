@@ -6,6 +6,7 @@ from .views import (
     AdminUserManageView,
     BadgeupTokenObtainPairView,
     ChangePasswordView,
+    FirebaseLoginView,
     GoogleCallbackView,
     GoogleLoginStartView,
     GoogleMobileLoginView,
@@ -32,4 +33,5 @@ urlpatterns = [
     path("google/login/", GoogleLoginStartView.as_view(), name="google-login"),
     path("google/callback/", GoogleCallbackView.as_view(), name="google-callback"),
     path("google/mobile/", GoogleMobileLoginView.as_view(), name="google-mobile"),
+    path("firebase/", FirebaseLoginView.as_view(), name="firebase-login"),
 ]
