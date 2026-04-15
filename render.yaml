@@ -6,7 +6,7 @@ services:
     region: oregon
     branch: main
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /api/
+    healthCheckPath: /api/health/
     envVars:
       - key: DJANGO_DEBUG
         value: "False"
