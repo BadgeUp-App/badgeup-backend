@@ -237,7 +237,7 @@ class MemberListView(APIView):
 
     def get(self, request):
         user = request.user
-        users = User.objects.exclude(id=user.id)
+        users = User.objects.exclude(id=user.id).filter(is_staff=False)
 
         friend_requests = FriendRequest.objects.filter(
             models.Q(from_user=user) | models.Q(to_user=user)

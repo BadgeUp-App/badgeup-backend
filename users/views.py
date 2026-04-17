@@ -88,7 +88,8 @@ class LeaderboardView(generics.ListAPIView):
         limit = int(self.request.query_params.get("limit", 20))
         limit = max(1, min(limit, 100))
         return (
-            User.objects.order_by("-points")
+            User.objects.filter(is_staff=False)
+            .order_by("-points")
             .prefetch_related("user_stickers")[:limit]
         )
 
