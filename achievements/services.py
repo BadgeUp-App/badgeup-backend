@@ -173,28 +173,33 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
     catalog_lines = []
     reference_imgs = []
 
-    for album in albums_qs:
-        tags = album.tags or album.theme or ""
-        tag_set = {t.strip().lower() for t in tags.split(",") if t.strip()}
-        is_person_album = bool(tag_set & person_tags)
+    try:
+        for album in albums_qs:
+            tags = album.tags or album.theme or ""
+            tag_set = {t.strip().lower() for t in tags.split(",") if t.strip()}
+            is_person_album = bool(tag_set & person_tags)
 
-        sticker_parts = []
-        for s in album.stickers.all():
-            sticker_parts.append(f"  - ID {s.id}: {s.name} -- {s.description or ''}")
-            if is_person_album:
-                ref_field = getattr(s, "reference_photo", None) or s.image_reference
-                if ref_field:
-                    try:
-                        url = ref_field.url
-                        if url and url.startswith("http"):
-                            reference_imgs.append((s.id, s.name, url))
-                    except (ValueError, Exception):
-                        pass
+            sticker_parts = []
+            for s in album.stickers.all():
+                sticker_parts.append(f"  - ID {s.id}: {s.name} -- {s.description or ''}")
+                if is_person_album:
+                    ref_field = getattr(s, "reference_photo", None) or s.image_reference
+                    if ref_field:
+                        try:
+                            url = ref_field.url
+                            if url and url.startswith("http"):
+                                reference_imgs.append((s.id, s.name, url))
+                        except Exception:
+                            pass
 
-        sticker_list = "\n".join(sticker_parts)
-        catalog_lines.append(
-            f"Album ID {album.id}: \"{album.title}\" [tags: {tags}]\nStickers:\n{sticker_list}"
-        )
+            sticker_list = "\n".join(sticker_parts)
+            catalog_lines.append(
+                f"Album ID {album.id}: \"{album.title}\" [tags: {tags}]\nStickers:\n{sticker_list}"
+            )
+    except Exception:
+        logger.exception("Error building sticker catalog")
+        reference_imgs = []
+
     catalog_text = "\n\n".join(catalog_lines) or "No hay albums disponibles."
 
     has_refs = len(reference_imgs) > 0

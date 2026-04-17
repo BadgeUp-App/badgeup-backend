@@ -1,3 +1,4 @@
+import logging
 import os
 
 from django.conf import settings
@@ -7,6 +8,8 @@ from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+logger = logging.getLogger(__name__)
 
 from achievements.models import UserSticker
 from achievements.services import analyze_car_photo, analyze_photo_global
@@ -312,7 +315,11 @@ class GlobalScanView(APIView):
             )
 
         albums = Album.objects.prefetch_related("stickers").all()
-        result = analyze_photo_global(photo, albums)
+        try:
+            result = analyze_photo_global(photo, albums)
+        except Exception:
+            logger.exception("Unhandled error in global scan")
+            result = None
         if not result:
             return Response(
                 {"unlocked": False, "message": "No pudimos analizar la foto. Intenta de nuevo."},
