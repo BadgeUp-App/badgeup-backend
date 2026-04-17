@@ -182,25 +182,40 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
     catalog_text = "\n\n".join(catalog_lines) or "No hay albums disponibles."
 
     system_msg = (
-        "Eres un experto en reconocimiento visual. Recibes UNA foto y un catalogo de albums con stickers.\n"
-        "Cada album tiene tags que describen su contenido y una lista de stickers con nombres.\n\n"
-        "Tu tarea:\n"
-        "1. Identifica que hay en la foto (vehiculo, animal, edificio, objeto, etc.).\n"
-        "2. Busca en que album(s) podria encajar segun los tags.\n"
-        "3. Si encuentras un sticker que coincida, devuelve su ID.\n"
-        "4. Si detectas algo pero no hay sticker, dilo claramente.\n\n"
+        "Eres un experto automotriz MUY estricto. Recibes UNA foto y un catalogo de stickers.\n\n"
+        "REGLAS ESTRICTAS DE IDENTIFICACION:\n"
+        "- Debes identificar la MARCA, MODELO EXACTO, GENERACION y RANGO DE ANIO.\n"
+        "- Un Toyota Tacoma NO es un Toyota Tundra. Un Mustang GT NO es un Shelby GT350.\n"
+        "- Fijate en detalles: parrilla, faros, proporciones, badges, rines, lineas de carroceria.\n"
+        "- Solo haz match si el vehiculo en la foto corresponde EXACTAMENTE al sticker.\n"
+        "- Si tienes duda entre dos modelos similares, usa confidence menor a 0.7 y NO hagas match.\n"
+        "- Confidence 0.9+ solo si estas SEGURO del modelo exacto.\n\n"
+        "MULTIPLES VEHICULOS:\n"
+        "- Si la foto muestra MAS DE UN vehiculo distinguible, devuelve TODOS los matches en el array 'matches'.\n"
+        "- Si solo hay UN vehiculo, el array 'matches' tiene un solo elemento.\n"
+        "- Cada match necesita su propia identificacion precisa.\n\n"
         "Responde SIEMPRE un JSON valido con este esquema EXACTO:\n"
         "{\n"
         '  "recognized": boolean,\n'
-        '  "detected_item": string|null,\n'
-        '  "detected_category": string|null,\n'
-        '  "confidence": number,\n'
-        '  "album_id": number|null,\n'
-        '  "sticker_id": number|null,\n'
-        '  "reason": string,\n'
+        '  "vehicle_count": number,\n'
+        '  "matches": [\n'
+        "    {\n"
+        '      "detected_item": string,\n'
+        '      "detected_category": string,\n'
+        '      "make": string|null,\n'
+        '      "model": string|null,\n'
+        '      "generation": string|null,\n'
+        '      "year_range": string|null,\n'
+        '      "confidence": number,\n'
+        '      "album_id": number|null,\n'
+        '      "sticker_id": number|null,\n'
+        '      "reason": string\n'
+        "    }\n"
+        "  ],\n"
         '  "fun_fact": string\n'
         "}\n"
-        "Si NO reconoces nada, usa recognized=false, confidence=0, y un mensaje amigable en fun_fact."
+        "Si NO reconoces nada, usa recognized=false, vehicle_count=0, matches=[], "
+        "y un mensaje amigable en fun_fact."
     )
 
     user_text = (
@@ -225,7 +240,7 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
                     ],
                 },
             ],
-            max_tokens=500,
+            max_tokens=800,
         )
         raw_content = completion.choices[0].message.content or "{}"
         data = json.loads(raw_content)
@@ -234,13 +249,29 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
         return None
 
     data.setdefault("recognized", False)
-    data.setdefault("detected_item", None)
-    data.setdefault("detected_category", None)
-    data.setdefault("confidence", 0.0)
-    data.setdefault("album_id", None)
-    data.setdefault("sticker_id", None)
-    data.setdefault("reason", "")
+    data.setdefault("vehicle_count", 0)
+    data.setdefault("matches", [])
     data.setdefault("fun_fact", "")
+
+    if not data["matches"] and data.get("sticker_id"):
+        data["matches"] = [{
+            "detected_item": data.get("detected_item", ""),
+            "detected_category": data.get("detected_category", ""),
+            "confidence": float(data.get("confidence", 0)),
+            "album_id": data.get("album_id"),
+            "sticker_id": data.get("sticker_id"),
+            "reason": data.get("reason", ""),
+        }]
+        data["vehicle_count"] = 1
+
+    for m in data["matches"]:
+        m.setdefault("confidence", 0.0)
+        m.setdefault("sticker_id", None)
+        m.setdefault("album_id", None)
+        m.setdefault("detected_item", "")
+        m.setdefault("detected_category", "")
+        m.setdefault("reason", "")
+
     return data
 
 

@@ -320,123 +320,143 @@ class GlobalScanView(APIView):
             )
 
         recognized = bool(result.get("recognized"))
-        confidence = float(result.get("confidence") or 0)
-        sticker_id = result.get("sticker_id")
-        album_id = result.get("album_id")
-        detected_item = result.get("detected_item") or ""
-        detected_category = result.get("detected_category") or ""
         fun_fact = result.get("fun_fact") or ""
-        reason = result.get("reason") or ""
+        matches = result.get("matches", [])
+        vehicle_count = result.get("vehicle_count", 0)
         lat = request.data.get("lat")
         lng = request.data.get("lng")
+        min_conf = float(os.getenv("MIN_VALIDATION_CONFIDENCE", "0.80"))
 
-        base_response = {
-            "detected_item": detected_item,
-            "detected_category": detected_category,
-            "reason": reason,
-            "fun_fact": fun_fact,
-        }
-
-        if not recognized:
+        if not recognized or not matches:
             return Response({
-                **base_response,
                 "unlocked": False,
+                "fun_fact": fun_fact,
                 "message": fun_fact or "No pudimos identificar algo reconocible en la foto.",
             })
 
-        if not sticker_id:
-            item_text = detected_item or "algo"
-            return Response({
-                **base_response,
-                "unlocked": False,
-                "message": f"Detectamos un {item_text}, pero no tenemos ese sticker aun.",
-            })
+        unlocked_stickers = []
+        rejected_matches = []
 
-        try:
-            sticker = Sticker.objects.select_related("album").get(pk=sticker_id)
-        except Sticker.DoesNotExist:
-            return Response({
-                **base_response,
-                "unlocked": False,
-                "message": "El sticker sugerido por la IA no existe.",
-            })
+        for match in matches:
+            confidence = float(match.get("confidence") or 0)
+            sticker_id = match.get("sticker_id")
+            detected_item = match.get("detected_item") or ""
+            detected_category = match.get("detected_category") or ""
+            reason = match.get("reason") or ""
 
-        if confidence < float(os.getenv("MIN_VALIDATION_CONFIDENCE", "0.6")):
-            return Response({
-                **base_response,
-                "unlocked": False,
-                "match_score": confidence,
-                "message": "La IA no esta lo suficientemente segura para desbloquear.",
-            })
+            if not sticker_id:
+                rejected_matches.append({
+                    "detected_item": detected_item,
+                    "reason": f"Detectamos un {detected_item or 'vehiculo'}, pero no tenemos ese sticker.",
+                })
+                continue
 
-        user_sticker, created = UserSticker.objects.get_or_create(
-            user=request.user, sticker=sticker,
-        )
+            try:
+                sticker = Sticker.objects.select_related("album").get(pk=sticker_id)
+            except Sticker.DoesNotExist:
+                continue
 
-        if user_sticker.validated and user_sticker.status == UserSticker.STATUS_APPROVED:
-            serializer = StickerSerializer(sticker, context={"request": request})
-            return Response({
-                **base_response,
-                "unlocked": True,
-                "already_unlocked": True,
-                "sticker": serializer.data,
+            if confidence < min_conf:
+                rejected_matches.append({
+                    "detected_item": detected_item,
+                    "sticker_name": sticker.name,
+                    "match_score": confidence,
+                    "reason": f"Parece un {detected_item} pero no estoy seguro de que sea {sticker.name} (score {confidence:.0%}).",
+                })
+                continue
+
+            if vehicle_count <= 1 and unlocked_stickers:
+                continue
+
+            user_sticker, _ = UserSticker.objects.get_or_create(
+                user=request.user, sticker=sticker,
+            )
+
+            if user_sticker.validated and user_sticker.status == UserSticker.STATUS_APPROVED:
+                unlocked_stickers.append({
+                    "already_unlocked": True,
+                    "sticker": StickerSerializer(sticker, context={"request": request}).data,
+                    "match_score": confidence,
+                    "album_id": sticker.album_id,
+                    "album_title": sticker.album.title,
+                })
+                continue
+
+            try:
+                photo.seek(0)
+            except Exception:
+                pass
+
+            user_sticker.unlocked_photo = photo
+            user_sticker.unlocked_at = user_sticker.unlocked_at or timezone.now()
+            user_sticker.validation_score = confidence
+            user_sticker.validation_notes = reason
+            user_sticker.detected_make = detected_item[:100] if detected_item else ""
+            user_sticker.detected_model = detected_category[:100] if detected_category else ""
+            user_sticker.fun_fact = fun_fact or user_sticker.fun_fact
+            if lat not in (None, ""):
+                try:
+                    user_sticker.location_lat = float(lat)
+                except (TypeError, ValueError):
+                    pass
+            if lng not in (None, ""):
+                try:
+                    user_sticker.location_lng = float(lng)
+                except (TypeError, ValueError):
+                    pass
+
+            user_sticker.status = UserSticker.STATUS_APPROVED
+            user_sticker.validated = True
+            user_sticker.save(
+                update_fields=[
+                    "unlocked_photo", "unlocked_at", "validation_score",
+                    "validation_notes", "detected_make", "detected_model",
+                    "fun_fact", "location_lat", "location_lng",
+                    "status", "validated", "updated_at",
+                ]
+            )
+
+            send_notification(
+                get_friend_ids(request.user.id),
+                {
+                    "title": "Captura de amigo",
+                    "message": f"{request.user.username} desbloqueo {sticker.name}",
+                    "category": "sticker_unlock",
+                },
+            )
+
+            unlocked_stickers.append({
+                "already_unlocked": False,
+                "sticker": StickerSerializer(sticker, context={"request": request}).data,
                 "match_score": confidence,
                 "album_id": sticker.album_id,
                 "album_title": sticker.album.title,
             })
 
-        try:
-            photo.seek(0)
-        except Exception:
-            pass
+        if not unlocked_stickers:
+            msg = "No pudimos hacer match con ningun sticker."
+            if rejected_matches:
+                msg = rejected_matches[0].get("reason", msg)
+            return Response({
+                "unlocked": False,
+                "fun_fact": fun_fact,
+                "rejected": rejected_matches,
+                "message": msg,
+            })
 
-        user_sticker.unlocked_photo = photo
-        user_sticker.unlocked_at = user_sticker.unlocked_at or timezone.now()
-        user_sticker.validation_score = confidence
-        user_sticker.validation_notes = reason
-        user_sticker.detected_make = detected_item[:100] if detected_item else ""
-        user_sticker.detected_model = detected_category[:100] if detected_category else ""
-        user_sticker.fun_fact = fun_fact or user_sticker.fun_fact
-        if lat not in (None, ""):
-            try:
-                user_sticker.location_lat = float(lat)
-            except (TypeError, ValueError):
-                pass
-        if lng not in (None, ""):
-            try:
-                user_sticker.location_lng = float(lng)
-            except (TypeError, ValueError):
-                pass
-
-        user_sticker.status = UserSticker.STATUS_APPROVED
-        user_sticker.validated = True
-        user_sticker.save(
-            update_fields=[
-                "unlocked_photo", "unlocked_at", "validation_score",
-                "validation_notes", "detected_make", "detected_model",
-                "fun_fact", "location_lat", "location_lng",
-                "status", "validated", "updated_at",
-            ]
-        )
-
-        send_notification(
-            get_friend_ids(request.user.id),
-            {
-                "title": "Captura de amigo",
-                "message": f"{request.user.username} desbloqueo {sticker.name}",
-                "category": "sticker_unlock",
-            },
-        )
-
-        serializer = StickerSerializer(sticker, context={"request": request})
+        first = unlocked_stickers[0]
         return Response({
-            **base_response,
             "unlocked": True,
-            "already_unlocked": False,
-            "sticker": serializer.data,
-            "match_score": confidence,
-            "album_id": sticker.album_id,
-            "album_title": sticker.album.title,
+            "already_unlocked": first.get("already_unlocked", False),
+            "sticker": first["sticker"],
+            "match_score": first["match_score"],
+            "album_id": first["album_id"],
+            "album_title": first["album_title"],
+            "fun_fact": fun_fact,
+            "detected_item": matches[0].get("detected_item", ""),
+            "detected_category": matches[0].get("detected_category", ""),
+            "reason": matches[0].get("reason", ""),
+            "all_unlocked": unlocked_stickers if len(unlocked_stickers) > 1 else None,
         })
 
 
