@@ -182,30 +182,42 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
     catalog_text = "\n\n".join(catalog_lines) or "No hay albums disponibles."
 
     system_msg = (
-        "Eres un experto automotriz MUY estricto. Recibes UNA foto y un catalogo de stickers.\n\n"
-        "REGLAS ESTRICTAS DE IDENTIFICACION:\n"
-        "- Debes identificar la MARCA, MODELO EXACTO, GENERACION y RANGO DE ANIO.\n"
-        "- Un Toyota Tacoma NO es un Toyota Tundra. Un Mustang GT NO es un Shelby GT350.\n"
-        "- Fijate en detalles: parrilla, faros, proporciones, badges, rines, lineas de carroceria.\n"
-        "- Solo haz match si el vehiculo en la foto corresponde EXACTAMENTE al sticker.\n"
-        "- Si tienes duda entre dos modelos similares, usa confidence menor a 0.7 y NO hagas match.\n"
-        "- Confidence 0.9+ solo si estas SEGURO del modelo exacto.\n\n"
-        "MULTIPLES VEHICULOS:\n"
-        "- Si la foto muestra MAS DE UN vehiculo distinguible, devuelve TODOS los matches en el array 'matches'.\n"
-        "- Si solo hay UN vehiculo, el array 'matches' tiene un solo elemento.\n"
-        "- Cada match necesita su propia identificacion precisa.\n\n"
+        "Eres un sistema de reconocimiento visual para una app de stickers coleccionables. "
+        "Recibes UNA foto y un catalogo de albums con tags y stickers.\n\n"
+        "PASO 1 — CLASIFICAR LA FOTO:\n"
+        "Determina que hay en la foto. Usa los TAGS de cada album para saber que categoria manejan:\n"
+        "- Tags con 'personas','profes','estudiantes' = albums de PERSONAS. "
+        "Compara rasgos fisicos, vestimenta y contexto contra la descripcion de cada sticker.\n"
+        "- Tags con 'autos','carros','pickup','deportivos','jdm' = albums de VEHICULOS. "
+        "Identifica marca, modelo EXACTO, generacion y anio.\n"
+        "- Otros tags = usa tu criterio para el tipo de contenido.\n\n"
+        "PASO 2 — BUSCAR MATCH EN ALBUMS RELEVANTES:\n"
+        "Solo busca en albums cuyas tags sean compatibles con lo que ves en la foto.\n\n"
+        "REGLAS POR CATEGORIA:\n\n"
+        "VEHICULOS:\n"
+        "- Identifica MARCA, MODELO EXACTO, GENERACION y RANGO DE ANIO.\n"
+        "- Un Toyota Tacoma NO es una Tundra. Un Mustang GT NO es un Shelby GT350.\n"
+        "- Fijate en parrilla, faros, proporciones, badges, rines, lineas de carroceria.\n"
+        "- Confidence 0.9+ solo si estas SEGURO del modelo exacto.\n"
+        "- Si hay MAS DE UN vehiculo, devuelve un match por cada uno.\n\n"
+        "PERSONAS:\n"
+        "- Lee el nombre y descripcion de cada sticker del album de personas.\n"
+        "- Compara la persona de la foto con las descripciones disponibles.\n"
+        "- Usa rasgos como complexion, barba, lentes, vestimenta, contexto.\n"
+        "- Confidence 0.8+ si la persona coincide claramente con un sticker.\n"
+        "- Si hay MAS DE UNA persona reconocible, devuelve un match por cada una.\n\n"
+        "GENERAL:\n"
+        "- Si tienes duda, usa confidence menor a 0.7 y NO hagas match.\n"
+        "- Si detectas algo que no esta en ningun album, dilo en reason.\n\n"
         "Responde SIEMPRE un JSON valido con este esquema EXACTO:\n"
         "{\n"
         '  "recognized": boolean,\n'
-        '  "vehicle_count": number,\n'
+        '  "item_count": number,\n'
+        '  "photo_category": string,\n'
         '  "matches": [\n'
         "    {\n"
         '      "detected_item": string,\n'
         '      "detected_category": string,\n'
-        '      "make": string|null,\n'
-        '      "model": string|null,\n'
-        '      "generation": string|null,\n'
-        '      "year_range": string|null,\n'
         '      "confidence": number,\n'
         '      "album_id": number|null,\n'
         '      "sticker_id": number|null,\n'
@@ -214,13 +226,14 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
         "  ],\n"
         '  "fun_fact": string\n'
         "}\n"
-        "Si NO reconoces nada, usa recognized=false, vehicle_count=0, matches=[], "
+        "Si NO reconoces nada, usa recognized=false, item_count=0, matches=[], "
         "y un mensaje amigable en fun_fact."
     )
 
     user_text = (
         f"Catalogo de albums y stickers:\n{catalog_text}\n\n"
-        "Analiza la foto y devuelve SOLO el JSON, sin texto extra."
+        "Analiza la foto, clasifica lo que ves, busca en los albums relevantes "
+        "y devuelve SOLO el JSON, sin texto extra."
     )
 
     try:
@@ -249,7 +262,8 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
         return None
 
     data.setdefault("recognized", False)
-    data.setdefault("vehicle_count", 0)
+    data.setdefault("item_count", data.get("vehicle_count", 0))
+    data.setdefault("photo_category", "unknown")
     data.setdefault("matches", [])
     data.setdefault("fun_fact", "")
 
@@ -262,7 +276,7 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
             "sticker_id": data.get("sticker_id"),
             "reason": data.get("reason", ""),
         }]
-        data["vehicle_count"] = 1
+        data["item_count"] = 1
 
     for m in data["matches"]:
         m.setdefault("confidence", 0.0)

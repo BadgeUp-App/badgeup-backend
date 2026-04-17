@@ -322,7 +322,7 @@ class GlobalScanView(APIView):
         recognized = bool(result.get("recognized"))
         fun_fact = result.get("fun_fact") or ""
         matches = result.get("matches", [])
-        vehicle_count = result.get("vehicle_count", 0)
+        vehicle_count = result.get("item_count") or result.get("vehicle_count") or 0
         lat = request.data.get("lat")
         lng = request.data.get("lng")
         min_conf = float(os.getenv("MIN_VALIDATION_CONFIDENCE", "0.80"))
