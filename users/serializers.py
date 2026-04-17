@@ -10,6 +10,8 @@ User = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
     computed_points = serializers.SerializerMethodField()
+    stickers_captured = serializers.SerializerMethodField()
+    rank = serializers.SerializerMethodField()
     reset_avatar = serializers.BooleanField(write_only=True, required=False)
 
     class Meta:
@@ -24,11 +26,13 @@ class UserSerializer(serializers.ModelSerializer):
             "bio",
             "points",
             "computed_points",
+            "stickers_captured",
+            "rank",
             "date_joined",
             "is_staff",
             "reset_avatar",
         )
-        read_only_fields = ("id", "points", "computed_points", "date_joined")
+        read_only_fields = ("id", "points", "computed_points", "stickers_captured", "rank", "date_joined")
 
     def update(self, instance, validated_data):
         request = self.context.get("request")
@@ -41,6 +45,34 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_computed_points(self, obj):
         return compute_user_points(obj)
+
+    def get_stickers_captured(self, obj):
+        return UserSticker.objects.filter(
+            user=obj, status=UserSticker.STATUS_APPROVED,
+        ).count()
+
+    def get_rank(self, obj):
+        if obj.is_staff:
+            return 0
+        from django.db.models import Q, Sum
+        from django.db.models.functions import Coalesce
+        my_points = compute_user_points(obj)
+        count_above = (
+            User.objects.filter(is_staff=False)
+            .exclude(id=obj.id)
+            .annotate(
+                total=Coalesce(
+                    Sum(
+                        "user_stickers__sticker__reward_points",
+                        filter=Q(user_stickers__status=UserSticker.STATUS_APPROVED),
+                    ),
+                    0,
+                )
+            )
+            .filter(total__gt=my_points)
+            .count()
+        )
+        return count_above + 1
 
 
 class UserCaptureSerializer(serializers.Serializer):
