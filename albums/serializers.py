@@ -195,6 +195,7 @@ class StickerCreateSerializer(serializers.ModelSerializer):
             "location_lat",
             "location_lng",
             "image_reference",
+            "reference_photo",
             "reward_points",
             "order",
             "rarity",

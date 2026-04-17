@@ -23,6 +23,12 @@ def sticker_image_upload(instance: "Sticker", filename: str) -> str:
     return _generate_filename("stickers/reference/", base, filename)
 
 
+def sticker_ref_photo_upload(instance: "Sticker", filename: str) -> str:
+    album_title = getattr(instance.album, "title", "") or "album"
+    base = f"{album_title}-{instance.name}"
+    return _generate_filename("stickers/refphoto/", base, filename)
+
+
 class Album(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
@@ -58,6 +64,12 @@ class Sticker(models.Model):
     location_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     image_reference = models.ImageField(
         upload_to=sticker_image_upload,
+        max_length=255,
+        blank=True,
+        null=True,
+    )
+    reference_photo = models.ImageField(
+        upload_to=sticker_ref_photo_upload,
         max_length=255,
         blank=True,
         null=True,

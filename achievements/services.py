@@ -169,27 +169,43 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
         except Exception:
             pass
 
+    person_tags = {"personas", "profes", "estudiantes", "maestros"}
     catalog_lines = []
+    reference_imgs = []
+
     for album in albums_qs:
         tags = album.tags or album.theme or ""
-        sticker_list = "\n".join(
-            f"  - ID {s.id}: {s.name} -- {s.description or ''}"
-            for s in album.stickers.all()
-        )
+        tag_set = {t.strip().lower() for t in tags.split(",") if t.strip()}
+        is_person_album = bool(tag_set & person_tags)
+
+        sticker_parts = []
+        for s in album.stickers.all():
+            sticker_parts.append(f"  - ID {s.id}: {s.name} -- {s.description or ''}")
+            if is_person_album:
+                ref_field = getattr(s, "reference_photo", None) or s.image_reference
+                if ref_field:
+                    try:
+                        url = ref_field.url
+                        if url and url.startswith("http"):
+                            reference_imgs.append((s.id, s.name, url))
+                    except (ValueError, Exception):
+                        pass
+
+        sticker_list = "\n".join(sticker_parts)
         catalog_lines.append(
             f"Album ID {album.id}: \"{album.title}\" [tags: {tags}]\nStickers:\n{sticker_list}"
         )
     catalog_text = "\n\n".join(catalog_lines) or "No hay albums disponibles."
+
+    has_refs = len(reference_imgs) > 0
 
     system_msg = (
         "Eres un sistema de reconocimiento visual para una app de stickers coleccionables. "
         "Recibes UNA foto y un catalogo de albums con tags y stickers.\n\n"
         "PASO 1 — CLASIFICAR LA FOTO:\n"
         "Determina que hay en la foto. Usa los TAGS de cada album para saber que categoria manejan:\n"
-        "- Tags con 'personas','profes','estudiantes' = albums de PERSONAS. "
-        "Compara rasgos fisicos, vestimenta y contexto contra la descripcion de cada sticker.\n"
-        "- Tags con 'autos','carros','pickup','deportivos','jdm' = albums de VEHICULOS. "
-        "Identifica marca, modelo EXACTO, generacion y anio.\n"
+        "- Tags con 'personas','profes','estudiantes' = albums de PERSONAS.\n"
+        "- Tags con 'autos','carros','pickup','deportivos','jdm' = albums de VEHICULOS.\n"
         "- Otros tags = usa tu criterio para el tipo de contenido.\n\n"
         "PASO 2 — BUSCAR MATCH EN ALBUMS RELEVANTES:\n"
         "Solo busca en albums cuyas tags sean compatibles con lo que ves en la foto.\n\n"
@@ -200,12 +216,28 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
         "- Fijate en parrilla, faros, proporciones, badges, rines, lineas de carroceria.\n"
         "- Confidence 0.9+ solo si estas SEGURO del modelo exacto.\n"
         "- Si hay MAS DE UN vehiculo, devuelve un match por cada uno.\n\n"
-        "PERSONAS:\n"
-        "- Lee el nombre y descripcion de cada sticker del album de personas.\n"
-        "- Compara la persona de la foto con las descripciones disponibles.\n"
-        "- Usa rasgos como complexion, barba, lentes, vestimenta, contexto.\n"
-        "- Confidence 0.8+ si la persona coincide claramente con un sticker.\n"
-        "- Si hay MAS DE UNA persona reconocible, devuelve un match por cada una.\n\n"
+    )
+
+    if has_refs:
+        system_msg += (
+            "PERSONAS CON REFERENCIA VISUAL:\n"
+            "Se incluyen IMAGENES DE REFERENCIA de los stickers de personas. "
+            "Compara VISUALMENTE la persona de la foto del usuario contra cada referencia. "
+            "Fijate en forma de la cara, rasgos faciales, complexion, barba, lentes, "
+            "peinado, vestimenta y contexto general.\n"
+            "- Confidence 0.85+ si el parecido es claro.\n"
+            "- Si hay MAS DE UNA persona reconocible, devuelve un match por cada una.\n\n"
+        )
+    else:
+        system_msg += (
+            "PERSONAS:\n"
+            "- Lee el nombre y descripcion de cada sticker del album de personas.\n"
+            "- Compara la persona de la foto con las descripciones disponibles.\n"
+            "- Confidence 0.8+ si la persona coincide claramente con un sticker.\n"
+            "- Si hay MAS DE UNA persona reconocible, devuelve un match por cada una.\n\n"
+        )
+
+    system_msg += (
         "GENERAL:\n"
         "- Si tienes duda, usa confidence menor a 0.7 y NO hagas match.\n"
         "- Si detectas algo que no esta en ningun album, dilo en reason.\n\n"
@@ -230,10 +262,30 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
         "y un mensaje amigable en fun_fact."
     )
 
-    user_text = (
-        f"Catalogo de albums y stickers:\n{catalog_text}\n\n"
-        "Analiza la foto, clasifica lo que ves, busca en los albums relevantes "
-        "y devuelve SOLO el JSON, sin texto extra."
+    content = [
+        {"type": "text", "text": f"Catalogo de albums y stickers:\n{catalog_text}\n\n"},
+    ]
+
+    if reference_imgs:
+        content.append(
+            {"type": "text", "text": "IMAGENES DE REFERENCIA (stickers de personas):\n"}
+        )
+        for sid, sname, img_url in reference_imgs[:10]:
+            content.append(
+                {"type": "text", "text": f"Referencia sticker ID {sid} ({sname}):"}
+            )
+            content.append(
+                {"type": "image_url", "image_url": {"url": img_url}}
+            )
+
+    content.append(
+        {"type": "text", "text": "\nFoto del usuario a analizar:"}
+    )
+    content.append(
+        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+    )
+    content.append(
+        {"type": "text", "text": "Analiza la foto, clasifica lo que ves, busca en los albums relevantes y devuelve SOLO el JSON."}
     )
 
     try:
@@ -242,16 +294,7 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_msg},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_text},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                        },
-                    ],
-                },
+                {"role": "user", "content": content},
             ],
             max_tokens=800,
         )
