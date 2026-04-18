@@ -397,9 +397,6 @@ class GlobalScanView(APIView):
                 })
                 continue
 
-            if vehicle_count <= 1 and unlocked_stickers:
-                continue
-
             user_sticker, _ = UserSticker.objects.get_or_create(
                 user=request.user, sticker=sticker,
             )
