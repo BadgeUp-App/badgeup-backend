@@ -2,7 +2,7 @@ import logging
 import os
 
 from django.conf import settings
-from django.db.models import F
+from django.db.models import Count, F, Prefetch, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, permissions, status
@@ -27,9 +27,38 @@ from .serializers import (
 )
 
 
+def _annotated_album_qs(user=None):
+    qs = Album.objects.annotate(_stickers_count=Count("stickers", distinct=True))
+    if user and user.is_authenticated:
+        qs = qs.annotate(
+            _unlocked_count=Count(
+                "stickers__user_stickers",
+                filter=Q(
+                    stickers__user_stickers__user=user,
+                    stickers__user_stickers__status="approved",
+                ),
+                distinct=True,
+            )
+        )
+    return qs
+
+
+def _prefetch_user_stickers(qs, user):
+    if user and user.is_authenticated:
+        us_qs = UserSticker.objects.filter(user=user).prefetch_related(
+            Prefetch("capture_photos", to_attr="_prefetched_captures")
+        )
+        qs = qs.prefetch_related(
+            Prefetch("user_stickers", queryset=us_qs, to_attr="_current_user_stickers")
+        )
+    return qs
+
+
 class AlbumListCreateView(generics.ListCreateAPIView):
-    queryset = Album.objects.prefetch_related("stickers").all()
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return _annotated_album_qs(self.request.user)
 
     def get_serializer_class(self):
         if self.request.method == "POST":
@@ -38,8 +67,18 @@ class AlbumListCreateView(generics.ListCreateAPIView):
 
 
 class AlbumDetailView(generics.RetrieveUpdateAPIView):
-    queryset = Album.objects.prefetch_related("stickers").all()
     permission_classes = [IsAdminOrReadOnly]
+
+    def get_queryset(self):
+        qs = _annotated_album_qs(self.request.user)
+        qs = qs.prefetch_related(
+            Prefetch("stickers", queryset=self._sticker_qs())
+        )
+        return qs
+
+    def _sticker_qs(self):
+        qs = Sticker.objects.select_related("album")
+        return _prefetch_user_stickers(qs, self.request.user)
 
     def get_serializer_class(self):
         if self.request.method in ("PUT", "PATCH"):
@@ -48,8 +87,11 @@ class AlbumDetailView(generics.RetrieveUpdateAPIView):
 
 
 class StickerDetailView(generics.RetrieveUpdateAPIView):
-    queryset = Sticker.objects.select_related("album")
     permission_classes = [IsAdminOrReadOnly]
+
+    def get_queryset(self):
+        qs = Sticker.objects.select_related("album")
+        return _prefetch_user_stickers(qs, self.request.user)
 
     def get_serializer_class(self):
         if self.request.method in ("PUT", "PATCH"):
@@ -58,15 +100,14 @@ class StickerDetailView(generics.RetrieveUpdateAPIView):
 
 
 class StickerListCreateView(generics.ListCreateAPIView):
-    queryset = Sticker.objects.select_related("album")
     permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = Sticker.objects.select_related("album")
         album_id = self.request.query_params.get("album")
         if album_id:
             qs = qs.filter(album_id=album_id)
-        return qs
+        return _prefetch_user_stickers(qs, self.request.user)
 
     def get_serializer_class(self):
         if self.request.method == "POST":

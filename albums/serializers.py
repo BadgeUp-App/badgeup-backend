@@ -49,30 +49,38 @@ class StickerSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("album",)
 
+    def _get_user_sticker(self, obj):
+        cache_attr = "_us_cache"
+        if hasattr(obj, cache_attr):
+            return getattr(obj, cache_attr)
+        if hasattr(obj, "_current_user_stickers"):
+            items = obj._current_user_stickers
+            result = items[0] if items else None
+        else:
+            request = self.context.get("request")
+            user = getattr(request, "user", None)
+            if not user or not user.is_authenticated:
+                result = None
+            else:
+                result = obj.user_stickers.filter(user=user).first()
+        setattr(obj, cache_attr, result)
+        return result
+
     def get_is_unlocked(self, obj):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return False
         if request.user.is_staff:
             return True
-        return obj.user_stickers.filter(
-            user=request.user,
-            status=UserSticker.STATUS_APPROVED,
-        ).exists()
+        us = self._get_user_sticker(obj)
+        return us is not None and us.status == UserSticker.STATUS_APPROVED
 
     def get_status(self, obj):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return None
-        capture = obj.user_stickers.filter(user=request.user).first()
-        return capture.status if capture else None
-
-    def _get_user_sticker(self, obj):
-        request = self.context.get("request")
-        user = getattr(request, "user", None)
-        if not user or not user.is_authenticated:
-            return None
-        return obj.user_stickers.filter(user=user).first()
+        us = self._get_user_sticker(obj)
+        return us.status if us else None
 
     def get_unlocked_photo_url(self, obj):
         us = self._get_user_sticker(obj)
@@ -87,7 +95,10 @@ class StickerSerializer(serializers.ModelSerializer):
         if not us:
             return []
         request = self.context.get("request")
-        photos = us.capture_photos.all().order_by("-captured_at")
+        if hasattr(us, "_prefetched_captures"):
+            photos = us._prefetched_captures
+        else:
+            photos = us.capture_photos.all().order_by("-captured_at")
         result = []
         for cp in photos:
             url = cp.photo.url if cp.photo else None
@@ -153,7 +164,7 @@ class StickerLocationSerializer(serializers.ModelSerializer):
 
 
 class AlbumSerializer(serializers.ModelSerializer):
-    stickers_count = serializers.IntegerField(source="stickers.count", read_only=True)
+    stickers_count = serializers.SerializerMethodField()
     unlocked_count = serializers.SerializerMethodField()
 
     class Meta:
@@ -172,7 +183,14 @@ class AlbumSerializer(serializers.ModelSerializer):
             "unlocked_count",
         )
 
+    def get_stickers_count(self, obj):
+        if hasattr(obj, "_stickers_count"):
+            return obj._stickers_count
+        return obj.stickers.count()
+
     def get_unlocked_count(self, obj):
+        if hasattr(obj, "_unlocked_count"):
+            return obj._unlocked_count
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return 0
