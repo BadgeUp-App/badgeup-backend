@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 
 logger = logging.getLogger(__name__)
 
-from achievements.models import UserSticker
+from achievements.models import CapturePhoto, UserSticker
 from achievements.services import analyze_car_photo, analyze_photo_global
 from achievements.utils import get_friend_ids, send_notification
 from .models import Album, Sticker
@@ -209,6 +209,19 @@ class MatchAlbumPhotoView(APIView):
         )
 
         if user_sticker.validated and user_sticker.status == UserSticker.STATUS_APPROVED:
+            try:
+                photo.seek(0)
+            except Exception:
+                pass
+            cp = CapturePhoto.objects.create(
+                user_sticker=user_sticker,
+                photo=photo,
+                location_lat=float(lat) if lat not in (None, "") else None,
+                location_lng=float(lng) if lng not in (None, "") else None,
+            )
+            user_sticker.unlocked_photo = cp.photo
+            user_sticker.fun_fact = fun_fact or user_sticker.fun_fact
+            user_sticker.save(update_fields=["unlocked_photo", "fun_fact", "updated_at"])
             serializer = StickerSerializer(
                 sticker, context={"request": request, "user": request.user}
             )
@@ -216,10 +229,11 @@ class MatchAlbumPhotoView(APIView):
                 {
                     "unlocked": True,
                     "already_unlocked": True,
+                    "photo_added": True,
                     "sticker": serializer.data,
                     "match_score": confidence,
                     "car": car_info,
-                    "reason": "Ya habías desbloqueado este sticker.",
+                    "reason": "Foto agregada a tu coleccion.",
                     "fun_fact": fun_fact,
                 },
                 status=status.HTTP_200_OK,
@@ -269,6 +283,17 @@ class MatchAlbumPhotoView(APIView):
                 "validated",
                 "updated_at",
             ]
+        )
+
+        try:
+            photo.seek(0)
+        except Exception:
+            pass
+        CapturePhoto.objects.create(
+            user_sticker=user_sticker,
+            photo=photo,
+            location_lat=user_sticker.location_lat,
+            location_lng=user_sticker.location_lng,
         )
 
         send_notification(
@@ -380,8 +405,22 @@ class GlobalScanView(APIView):
             )
 
             if user_sticker.validated and user_sticker.status == UserSticker.STATUS_APPROVED:
+                try:
+                    photo.seek(0)
+                except Exception:
+                    pass
+                cp = CapturePhoto.objects.create(
+                    user_sticker=user_sticker,
+                    photo=photo,
+                    location_lat=float(lat) if lat not in (None, "") else None,
+                    location_lng=float(lng) if lng not in (None, "") else None,
+                )
+                user_sticker.unlocked_photo = cp.photo
+                user_sticker.fun_fact = fun_fact or user_sticker.fun_fact
+                user_sticker.save(update_fields=["unlocked_photo", "fun_fact", "updated_at"])
                 unlocked_stickers.append({
                     "already_unlocked": True,
+                    "photo_added": True,
                     "sticker": StickerSerializer(sticker, context={"request": request}).data,
                     "match_score": confidence,
                     "album_id": sticker.album_id,
@@ -421,6 +460,17 @@ class GlobalScanView(APIView):
                     "fun_fact", "location_lat", "location_lng",
                     "status", "validated", "updated_at",
                 ]
+            )
+
+            try:
+                photo.seek(0)
+            except Exception:
+                pass
+            CapturePhoto.objects.create(
+                user_sticker=user_sticker,
+                photo=photo,
+                location_lat=user_sticker.location_lat,
+                location_lng=user_sticker.location_lng,
             )
 
             send_notification(

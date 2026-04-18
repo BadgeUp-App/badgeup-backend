@@ -11,4 +11,4 @@ jobs:
     steps:
       - name: Ping backend
         run: |
-          curl -sf --max-time 15 https://badgeup-backend-production.up.railway.app/api/health/ || true
+          curl -sf --max-time 15 https://badgeup-backend.onrender.com/api/health/ || true

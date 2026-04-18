@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from achievements.models import UserSticker
+from achievements.models import CapturePhoto, UserSticker
 
 from .models import Album, Sticker
 
@@ -10,6 +10,7 @@ class StickerSerializer(serializers.ModelSerializer):
     is_unlocked = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
     unlocked_photo_url = serializers.SerializerMethodField()
+    capture_photos = serializers.SerializerMethodField()
     user_message = serializers.SerializerMethodField()
     fun_fact = serializers.SerializerMethodField()
     unlocked_at = serializers.SerializerMethodField()
@@ -36,6 +37,7 @@ class StickerSerializer(serializers.ModelSerializer):
             "is_unlocked",
             "status",
             "unlocked_photo_url",
+            "capture_photos",
             "user_message",
             "fun_fact",
             "unlocked_at",
@@ -79,6 +81,24 @@ class StickerSerializer(serializers.ModelSerializer):
             url = us.unlocked_photo.url
             return request.build_absolute_uri(url) if request else url
         return None
+
+    def get_capture_photos(self, obj):
+        us = self._get_user_sticker(obj)
+        if not us:
+            return []
+        request = self.context.get("request")
+        photos = us.capture_photos.all().order_by("-captured_at")
+        result = []
+        for cp in photos:
+            url = cp.photo.url if cp.photo else None
+            if url and request:
+                url = request.build_absolute_uri(url)
+            result.append({
+                "id": cp.id,
+                "url": url,
+                "captured_at": cp.captured_at.isoformat() if cp.captured_at else None,
+            })
+        return result
 
     def get_user_message(self, obj):
         us = self._get_user_sticker(obj)

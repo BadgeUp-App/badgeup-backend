@@ -61,6 +61,24 @@ class UserSticker(models.Model):
         return f"{self.user} - {self.sticker}"
 
 
+class CapturePhoto(models.Model):
+    user_sticker = models.ForeignKey(
+        UserSticker,
+        related_name="capture_photos",
+        on_delete=models.CASCADE,
+    )
+    photo = models.ImageField(upload_to="capture_photos/")
+    captured_at = models.DateTimeField(auto_now_add=True)
+    location_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    location_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+
+    class Meta:
+        ordering = ["-captured_at"]
+
+    def __str__(self) -> str:
+        return f"Photo {self.id} for {self.user_sticker}"
+
+
 class FriendRequest(models.Model):
     STATUS_PENDING = "pending"
     STATUS_ACCEPTED = "accepted"
