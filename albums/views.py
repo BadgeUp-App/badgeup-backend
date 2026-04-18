@@ -161,15 +161,15 @@ class StickerLocationListView(generics.ListAPIView):
     pagination_class = None
 
     def get_queryset(self):
-        qs = UserSticker.objects.filter(
-            location_lat__isnull=False,
-            location_lng__isnull=False,
-        ).select_related("sticker__album", "user")
-
-        if not self.request.user.is_staff:
-            qs = qs.filter(user=self.request.user)
-
-        return qs.order_by("-unlocked_at")
+        return (
+            UserSticker.objects.filter(
+                user=self.request.user,
+                location_lat__isnull=False,
+                location_lng__isnull=False,
+            )
+            .select_related("sticker__album", "user")
+            .order_by("-unlocked_at")
+        )
 
 
 class MatchAlbumPhotoView(APIView):
