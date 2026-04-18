@@ -401,28 +401,33 @@ class GlobalScanView(APIView):
         elif result:
             detected = result.get("photo_category", "")
 
-        try:
-            photo.seek(0)
-        except Exception:
-            pass
+        should_log = False
+        if not recognized or not matches:
+            should_log = True
+        elif not was_matched:
+            should_log = True
 
-        try:
-            ScanLog.objects.create(
-                user=request.user if request.user.is_authenticated else None,
-                photo=photo,
-                ai_response=result or {},
-                detected_items=detected[:500],
-                matched_sticker=first_match_sticker,
-                matched=was_matched,
-                confidence=best_confidence,
-            )
-        except Exception:
-            logger.exception("Failed to save scan log")
-
-        try:
-            photo.seek(0)
-        except Exception:
-            pass
+        if should_log:
+            try:
+                photo.seek(0)
+            except Exception:
+                pass
+            try:
+                ScanLog.objects.create(
+                    user=request.user if request.user.is_authenticated else None,
+                    photo=photo,
+                    ai_response=result or {},
+                    detected_items=detected[:500],
+                    matched_sticker=first_match_sticker,
+                    matched=False,
+                    confidence=best_confidence,
+                )
+            except Exception:
+                logger.exception("Failed to save scan log")
+            try:
+                photo.seek(0)
+            except Exception:
+                pass
 
         if not recognized or not matches:
             return Response({
