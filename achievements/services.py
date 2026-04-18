@@ -112,7 +112,7 @@ def analyze_car_photo(photo_file, stickers: Iterable[Sticker]) -> dict[str, Any]
 
     try:
         completion = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+            model=os.getenv("OPENAI_MODEL", "gpt-4.1"),
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_msg},
@@ -301,7 +301,7 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
 
     try:
         completion = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+            model=os.getenv("OPENAI_MODEL", "gpt-4.1"),
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_msg},
@@ -392,7 +392,7 @@ def analyze_user_sticker(user_sticker: UserSticker) -> dict[str, Any]:
 
     try:
         response = client.responses.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+            model=os.getenv("OPENAI_MODEL", "gpt-4.1"),
             input=[
                 {
                     "role": "user",
