@@ -116,14 +116,15 @@ class StickerLocationListView(generics.ListAPIView):
     serializer_class = StickerLocationSerializer
 
     def get_queryset(self):
-        return (
-            UserSticker.objects.filter(
-                location_lat__isnull=False,
-                location_lng__isnull=False,
-            )
-            .select_related("sticker__album", "user")
-            .order_by("-unlocked_at")
-        )
+        qs = UserSticker.objects.filter(
+            location_lat__isnull=False,
+            location_lng__isnull=False,
+        ).select_related("sticker__album", "user")
+
+        if not self.request.user.is_staff:
+            qs = qs.filter(user=self.request.user)
+
+        return qs.order_by("-unlocked_at")
 
 
 class MatchAlbumPhotoView(APIView):
