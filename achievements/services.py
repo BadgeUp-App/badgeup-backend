@@ -221,6 +221,12 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
         "- Fijate en parrilla, faros, proporciones, badges, rines, lineas de carroceria.\n"
         "- Confidence 0.9+ solo si estas SEGURO del modelo exacto.\n"
         "- Si hay MAS DE UN vehiculo, devuelve un match por cada uno.\n\n"
+        "REGLA CRITICA — PRECISION SOBRE TODO:\n"
+        "- SIEMPRE elige el sticker que MEJOR coincida con lo que ves, sin importar nada mas.\n"
+        "- NUNCA evites un match exacto para elegir uno 'parecido'. Si ves una Toyota Tacoma "
+        "y existe el sticker 'Toyota Tacoma', ese es el match correcto. No elijas 'Toyota Hilux' "
+        "ni ningun otro modelo similar solo porque crees que seria mejor.\n"
+        "- Tu UNICO criterio es la precision visual. No intentes ser creativo ni diversificar.\n\n"
     )
 
     if has_refs:
