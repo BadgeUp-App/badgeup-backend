@@ -368,34 +368,12 @@ class GlobalScanView(APIView):
 
         unlocked_stickers = []
         rejected_matches = []
+        processed_ids = set()
 
-        for match in matches:
-            confidence = float(match.get("confidence") or 0)
-            sticker_id = match.get("sticker_id")
-            detected_item = match.get("detected_item") or ""
-            detected_category = match.get("detected_category") or ""
-            reason = match.get("reason") or ""
-
-            if not sticker_id:
-                rejected_matches.append({
-                    "detected_item": detected_item,
-                    "reason": f"Detectamos un {detected_item or 'vehiculo'}, pero no tenemos ese sticker.",
-                })
-                continue
-
-            try:
-                sticker = Sticker.objects.select_related("album").get(pk=sticker_id)
-            except Sticker.DoesNotExist:
-                continue
-
-            if confidence < min_conf:
-                rejected_matches.append({
-                    "detected_item": detected_item,
-                    "sticker_name": sticker.name,
-                    "match_score": confidence,
-                    "reason": f"Parece un {detected_item} pero no estoy seguro de que sea {sticker.name} (score {confidence:.0%}).",
-                })
-                continue
+        def _process_sticker(sticker, confidence, detected_item, detected_category, reason):
+            if sticker.id in processed_ids:
+                return
+            processed_ids.add(sticker.id)
 
             user_sticker, _ = UserSticker.objects.get_or_create(
                 user=request.user, sticker=sticker,
@@ -423,7 +401,7 @@ class GlobalScanView(APIView):
                     "album_id": sticker.album_id,
                     "album_title": sticker.album.title,
                 })
-                continue
+                return
 
             try:
                 photo.seek(0)
@@ -486,6 +464,42 @@ class GlobalScanView(APIView):
                 "album_id": sticker.album_id,
                 "album_title": sticker.album.title,
             })
+
+        for match in matches:
+            confidence = float(match.get("confidence") or 0)
+            sticker_id = match.get("sticker_id")
+            detected_item = match.get("detected_item") or ""
+            detected_category = match.get("detected_category") or ""
+            reason = match.get("reason") or ""
+
+            if not sticker_id:
+                rejected_matches.append({
+                    "detected_item": detected_item,
+                    "reason": f"Detectamos un {detected_item or 'vehiculo'}, pero no tenemos ese sticker.",
+                })
+                continue
+
+            try:
+                sticker = Sticker.objects.select_related("album").get(pk=sticker_id)
+            except Sticker.DoesNotExist:
+                continue
+
+            if confidence < min_conf:
+                rejected_matches.append({
+                    "detected_item": detected_item,
+                    "sticker_name": sticker.name,
+                    "match_score": confidence,
+                    "reason": f"Parece un {detected_item} pero no estoy seguro de que sea {sticker.name} (score {confidence:.0%}).",
+                })
+                continue
+
+            _process_sticker(sticker, confidence, detected_item, detected_category, reason)
+
+            siblings = Sticker.objects.select_related("album").filter(
+                name__iexact=sticker.name,
+            ).exclude(id=sticker.id)
+            for sib in siblings:
+                _process_sticker(sib, confidence, detected_item, detected_category, reason)
 
         if not unlocked_stickers:
             msg = "No pudimos hacer match con ningun sticker."
