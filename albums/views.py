@@ -120,15 +120,18 @@ class StickerListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         sticker = serializer.save()
-        send_notification(
-            [],
-            {
-                "title": "Nuevo sticker",
-                "message": f"Se agregó el sticker {sticker.name}",
-                "category": "sticker_new",
-            },
-            broadcast=True,
-        )
+        try:
+            send_notification(
+                [],
+                {
+                    "title": "Nuevo sticker",
+                    "message": f"Se agregó el sticker {sticker.name}",
+                    "category": "sticker_new",
+                },
+                broadcast=True,
+            )
+        except Exception:
+            logger.debug("send_notification skipped (no channels backend)")
 
 
 class StickerReferenceUploadView(APIView):
@@ -155,6 +158,7 @@ class StickerReferenceUploadView(APIView):
 class StickerLocationListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = StickerLocationSerializer
+    pagination_class = None
 
     def get_queryset(self):
         qs = UserSticker.objects.filter(
