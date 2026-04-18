@@ -621,10 +621,14 @@ class StickerMessageView(APIView):
 
 class ScanLogListView(generics.ListAPIView):
     serializer_class = ScanLogSerializer
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        qs = ScanLog.objects.select_related("user", "matched_sticker", "matched_sticker__album").all()
+        qs = ScanLog.objects.select_related(
+            "user", "matched_sticker", "matched_sticker__album"
+        ).all()
+        if not self.request.user.is_staff:
+            qs = qs.filter(user=self.request.user)
         matched = self.request.query_params.get("matched")
         if matched is not None:
             qs = qs.filter(matched=matched.lower() in ("true", "1"))
