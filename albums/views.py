@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 from achievements.models import CapturePhoto, UserSticker
 from achievements.services import analyze_car_photo, analyze_photo_global
 from achievements.utils import get_friend_ids, send_notification
-from .models import Album, Sticker
+from .models import Album, Sticker, StickerReferencePhoto
 from .permissions import IsAdminOrReadOnly
 from .serializers import (
     AlbumCreateSerializer,
@@ -87,6 +87,27 @@ class StickerListCreateView(generics.ListCreateAPIView):
             },
             broadcast=True,
         )
+
+
+class StickerReferenceUploadView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+    parser_classes = [
+        __import__("rest_framework.parsers", fromlist=["MultiPartParser"]).MultiPartParser,
+    ]
+
+    def post(self, request, pk):
+        sticker = get_object_or_404(Sticker, pk=pk)
+        photos = request.FILES.getlist("photos") or request.FILES.getlist("photo")
+        if not photos:
+            return Response({"error": "No se enviaron fotos"}, status=status.HTTP_400_BAD_REQUEST)
+        label = request.data.get("label", "")
+        created = []
+        for f in photos:
+            ref = StickerReferencePhoto.objects.create(
+                sticker=sticker, photo=f, label=label,
+            )
+            created.append({"id": ref.id, "url": ref.photo.url, "label": ref.label})
+        return Response({"uploaded": len(created), "photos": created}, status=status.HTTP_201_CREATED)
 
 
 class StickerLocationListView(generics.ListAPIView):
