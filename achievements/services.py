@@ -183,14 +183,25 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
             for s in album.stickers.all():
                 sticker_parts.append(f"  - ID {s.id}: {s.name} -- {s.description or ''}")
                 if is_person_album:
-                    ref_field = getattr(s, "reference_photo", None) or s.image_reference
-                    if ref_field:
-                        try:
-                            url = ref_field.url
-                            if url and url.startswith("http"):
-                                reference_imgs.append((s.id, s.name, url))
-                        except Exception:
-                            pass
+                    multi_refs = list(s.reference_photos.all())
+                    if multi_refs:
+                        for rp in multi_refs:
+                            try:
+                                url = rp.photo.url
+                                if url and url.startswith("http"):
+                                    lbl = rp.label or ""
+                                    reference_imgs.append((s.id, s.name, url, lbl))
+                            except Exception:
+                                pass
+                    else:
+                        ref_field = getattr(s, "reference_photo", None) or s.image_reference
+                        if ref_field:
+                            try:
+                                url = ref_field.url
+                                if url and url.startswith("http"):
+                                    reference_imgs.append((s.id, s.name, url, ""))
+                            except Exception:
+                                pass
 
             sticker_list = "\n".join(sticker_parts)
             catalog_lines.append(
@@ -281,9 +292,10 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
         content.append(
             {"type": "text", "text": "IMAGENES DE REFERENCIA (stickers de personas):\n"}
         )
-        for sid, sname, img_url in reference_imgs[:10]:
+        for sid, sname, img_url, lbl in reference_imgs[:20]:
+            tag = f" [{lbl}]" if lbl else ""
             content.append(
-                {"type": "text", "text": f"Referencia sticker ID {sid} ({sname}):"}
+                {"type": "text", "text": f"Referencia sticker ID {sid} ({sname}){tag}:"}
             )
             content.append(
                 {"type": "image_url", "image_url": {"url": img_url}}

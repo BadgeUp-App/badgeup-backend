@@ -86,3 +86,27 @@ class Sticker(models.Model):
 
     def __str__(self) -> str:
         return f"{self.album.title} - {self.name}"
+
+
+def _ref_photo_upload(instance: "StickerReferencePhoto", filename: str) -> str:
+    sticker = instance.sticker
+    album_title = getattr(sticker.album, "title", "") or "album"
+    base = f"{album_title}-{sticker.name}"
+    return _generate_filename("stickers/refs/", base, filename)
+
+
+class StickerReferencePhoto(models.Model):
+    sticker = models.ForeignKey(
+        Sticker,
+        related_name="reference_photos",
+        on_delete=models.CASCADE,
+    )
+    photo = models.ImageField(upload_to=_ref_photo_upload, max_length=255)
+    label = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"Ref: {self.sticker.name} ({self.label or 'sin etiqueta'})"
