@@ -213,6 +213,11 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
 
     catalog_text = "\n\n".join(catalog_lines) or "No hay albums disponibles."
 
+    custom_prompts = []
+    for album in albums_qs:
+        if hasattr(album, 'custom_prompt') and album.custom_prompt:
+            custom_prompts.append(f"Album \"{album.title}\": {album.custom_prompt}")
+
     has_refs = len(reference_imgs) > 0
 
     system_msg = (
@@ -263,6 +268,16 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
         "GENERAL:\n"
         "- Si tienes duda, usa confidence menor a 0.7 y NO hagas match.\n"
         "- Si detectas algo que no esta en ningun album, dilo en reason.\n\n"
+    )
+
+    if custom_prompts:
+        system_msg += (
+            "INSTRUCCIONES ESPECIALES POR ALBUM:\n"
+            + "\n".join(custom_prompts)
+            + "\n\n"
+        )
+
+    system_msg += (
         "Responde SIEMPRE un JSON valido con este esquema EXACTO:\n"
         "{\n"
         '  "recognized": boolean,\n'

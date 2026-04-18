@@ -1,6 +1,7 @@
 import os
 from uuid import uuid4
 
+from django.conf import settings
 from django.db import models
 from django.utils.text import slugify
 
@@ -40,6 +41,7 @@ class Album(models.Model):
         null=True,
     )
     tags = models.CharField(max_length=500, blank=True, default="")
+    custom_prompt = models.TextField(blank=True, default="")
     is_premium = models.BooleanField(default=False)
     price = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -110,3 +112,37 @@ class StickerReferencePhoto(models.Model):
 
     def __str__(self) -> str:
         return f"Ref: {self.sticker.name} ({self.label or 'sin etiqueta'})"
+
+
+def _scan_log_upload(instance: "ScanLog", filename: str) -> str:
+    return _generate_filename("scanlogs/", "scan", filename)
+
+
+class ScanLog(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scan_logs",
+    )
+    photo = models.ImageField(upload_to=_scan_log_upload, max_length=255, blank=True, null=True)
+    ai_response = models.JSONField(default=dict, blank=True)
+    detected_items = models.CharField(max_length=500, blank=True, default="")
+    matched_sticker = models.ForeignKey(
+        Sticker,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scan_logs",
+    )
+    matched = models.BooleanField(default=False)
+    confidence = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        status = "match" if self.matched else "no match"
+        return f"Scan {self.id}: {self.detected_items[:50] or 'unknown'} ({status})"

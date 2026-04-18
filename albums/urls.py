@@ -4,6 +4,7 @@ from .views import (
     AlbumDetailView,
     AlbumListCreateView,
     MatchAlbumPhotoView,
+    ScanLogListView,
     StickerDetailView,
     StickerMessageView,
     StickerReferenceUploadView,
@@ -16,4 +17,5 @@ urlpatterns = [
     path("stickers/<int:pk>/", StickerDetailView.as_view(), name="sticker-detail"),
     path("stickers/<int:pk>/message/", StickerMessageView.as_view(), name="sticker-message"),
     path("stickers/<int:pk>/references/", StickerReferenceUploadView.as_view(), name="sticker-references"),
+    path("scan-logs/", ScanLogListView.as_view(), name="scan-log-list"),
 ]

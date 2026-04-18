@@ -14,12 +14,13 @@ logger = logging.getLogger(__name__)
 from achievements.models import CapturePhoto, UserSticker
 from achievements.services import analyze_car_photo, analyze_photo_global
 from achievements.utils import get_friend_ids, send_notification
-from .models import Album, Sticker, StickerReferencePhoto
+from .models import Album, ScanLog, Sticker, StickerReferencePhoto
 from .permissions import IsAdminOrReadOnly
 from .serializers import (
     AlbumCreateSerializer,
     AlbumDetailSerializer,
     AlbumSerializer,
+    ScanLogSerializer,
     StickerCreateSerializer,
     StickerLocationSerializer,
     StickerSerializer,
@@ -361,6 +362,7 @@ class GlobalScanView(APIView):
             )
 
         albums = Album.objects.prefetch_related("stickers").all()
+        min_conf = float(os.getenv("MIN_VALIDATION_CONFIDENCE", "0.80"))
         try:
             result = analyze_photo_global(photo, albums)
         except Exception:
@@ -378,7 +380,49 @@ class GlobalScanView(APIView):
         vehicle_count = result.get("item_count") or result.get("vehicle_count") or 0
         lat = request.data.get("lat")
         lng = request.data.get("lng")
-        min_conf = float(os.getenv("MIN_VALIDATION_CONFIDENCE", "0.80"))
+
+        detected = ""
+        first_match_sticker = None
+        was_matched = False
+        best_confidence = 0.0
+
+        if result and result.get("matches"):
+            items = [m.get("detected_item", "") for m in result["matches"] if m.get("detected_item")]
+            detected = ", ".join(items)
+            for m in result["matches"]:
+                if m.get("sticker_id") and float(m.get("confidence", 0)) >= min_conf:
+                    was_matched = True
+                    if float(m.get("confidence", 0)) > best_confidence:
+                        best_confidence = float(m.get("confidence", 0))
+                        try:
+                            first_match_sticker = Sticker.objects.get(pk=m["sticker_id"])
+                        except Sticker.DoesNotExist:
+                            pass
+        elif result:
+            detected = result.get("photo_category", "")
+
+        try:
+            photo.seek(0)
+        except Exception:
+            pass
+
+        try:
+            ScanLog.objects.create(
+                user=request.user if request.user.is_authenticated else None,
+                photo=photo,
+                ai_response=result or {},
+                detected_items=detected[:500],
+                matched_sticker=first_match_sticker,
+                matched=was_matched,
+                confidence=best_confidence,
+            )
+        except Exception:
+            logger.exception("Failed to save scan log")
+
+        try:
+            photo.seek(0)
+        except Exception:
+            pass
 
         if not recognized or not matches:
             return Response({
@@ -567,3 +611,15 @@ class StickerMessageView(APIView):
             context={"request": request, "user": request.user},
         )
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ScanLogListView(generics.ListAPIView):
+    serializer_class = ScanLogSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+    def get_queryset(self):
+        qs = ScanLog.objects.select_related("user", "matched_sticker", "matched_sticker__album").all()
+        matched = self.request.query_params.get("matched")
+        if matched is not None:
+            qs = qs.filter(matched=matched.lower() in ("true", "1"))
+        return qs

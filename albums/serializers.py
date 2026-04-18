@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from achievements.models import CapturePhoto, UserSticker
 
-from .models import Album, Sticker
+from .models import Album, ScanLog, Sticker
 
 
 class StickerSerializer(serializers.ModelSerializer):
@@ -165,6 +165,7 @@ class AlbumSerializer(serializers.ModelSerializer):
             "theme",
             "cover_image",
             "tags",
+            "custom_prompt",
             "is_premium",
             "price",
             "stickers_count",
@@ -198,6 +199,7 @@ class AlbumCreateSerializer(serializers.ModelSerializer):
             "description",
             "theme",
             "tags",
+            "custom_prompt",
             "cover_image",
             "is_premium",
             "price",
@@ -220,3 +222,31 @@ class StickerCreateSerializer(serializers.ModelSerializer):
             "order",
             "rarity",
         )
+
+
+class ScanLogSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source="user.username", read_only=True, default="")
+    sticker_name = serializers.CharField(source="matched_sticker.name", read_only=True, default=None)
+    album_title = serializers.SerializerMethodField()
+    photo_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ScanLog
+        fields = (
+            "id", "username", "photo", "photo_url", "ai_response",
+            "detected_items", "matched_sticker", "sticker_name",
+            "album_title", "matched", "confidence", "created_at",
+        )
+
+    def get_album_title(self, obj):
+        if obj.matched_sticker and obj.matched_sticker.album:
+            return obj.matched_sticker.album.title
+        return None
+
+    def get_photo_url(self, obj):
+        if obj.photo:
+            try:
+                return obj.photo.url
+            except Exception:
+                return None
+        return None
