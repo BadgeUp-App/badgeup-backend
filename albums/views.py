@@ -564,14 +564,17 @@ class GlobalScanView(APIView):
                 location_lng=user_sticker.location_lng,
             )
 
-            send_notification(
-                get_friend_ids(request.user.id),
-                {
-                    "title": "Captura de amigo",
-                    "message": f"{request.user.username} desbloqueo {sticker.name}",
-                    "category": "sticker_unlock",
-                },
-            )
+            try:
+                send_notification(
+                    get_friend_ids(request.user.id),
+                    {
+                        "title": "Captura de amigo",
+                        "message": f"{request.user.username} desbloqueo {sticker.name}",
+                        "category": "sticker_unlock",
+                    },
+                )
+            except Exception:
+                pass
 
             unlocked_stickers.append({
                 "already_unlocked": False,
@@ -640,7 +643,8 @@ class GlobalScanView(APIView):
             "detected_item": matches[0].get("detected_item", ""),
             "detected_category": matches[0].get("detected_category", ""),
             "reason": matches[0].get("reason", ""),
-            "all_unlocked": unlocked_stickers if len(unlocked_stickers) > 1 else None,
+            "unlock_count": len(unlocked_stickers),
+            "all_unlocked": unlocked_stickers,
         })
 
 

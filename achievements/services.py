@@ -265,6 +265,12 @@ def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
         )
 
     system_msg += (
+        "REGLA DE MULTIPLES ITEMS:\n"
+        "- Si la foto muestra VARIOS objetos, animales, plantas, personas o vehiculos, "
+        "devuelve UN match por CADA uno que coincida con algun sticker.\n"
+        "- Ejemplo: foto con un perro y un gato = 2 matches si ambos tienen sticker.\n"
+        "- Ejemplo: foto con 3 flores distintas = 3 matches.\n"
+        "- No te limites a un solo match por foto.\n\n"
         "GENERAL:\n"
         "- Si tienes duda, usa confidence menor a 0.7 y NO hagas match.\n"
         "- Si detectas algo que no esta en ningun album, dilo en reason.\n\n"
