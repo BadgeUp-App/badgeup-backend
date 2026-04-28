@@ -1,146 +1,91 @@
-# BadgeUp – Backend
+# BadgeUp — Backend
 
-Backend para la plataforma BadgeUp: álbumes coleccionables digitales, validación de fotos en campo y gamificación con puntos y logros. El proyecto usa Django, Django REST Framework y SimpleJWT para exponer la API, con PostgreSQL, Celery/Redis y servicios externos como OpenAI Vision.
+API de la plataforma BadgeUp. Albumes coleccionables digitales, captura de fotos en campo, validacion con IA, gamificacion y geolocalizacion.
 
-## Características
-- Autenticación con JWT (registro, login, perfil, leaderboard).
-- Gestión de álbumes y stickers, con campos para ubicación y recompensa.
-- Flujo de desbloqueo de stickers con subida de fotos y validación asíncrona vía Celery.
-- Integración preparada para OpenAI Vision (modo simulación si no hay API key).
-- Deploy y desarrollo con Docker + Docker Compose.
+Backend en produccion: <https://badgeup-backend.onrender.com>
+
+## Que hace
+
+- Maneja usuarios, albumes y stickers con multiples tipos de raridad y sistema de puntos.
+- Procesa fotos enviadas por la app: una sola foto puede desbloquear varios stickers a la vez (multi-unlock) cuando la imagen contiene varios elementos detectables.
+- Usa OpenAI Vision (`gpt-4.1-mini`) para reconocer contenido y decidir matches contra los stickers de cada album.
+- Valida ubicacion GPS por sticker cuando el album lo requiere.
+- Soporta reconocimiento facial opcional para albumes de personas.
+- Registra cada captura con metadatos (foto, lat/lng, fecha) para reconstruir un mapa personal por usuario.
+- Expone endpoints para leaderboard global, historial de captura, scan logs y administracion de albums.
 
 ## Stack
-- **Python 3.11 (Docker) / 3.9 local**
-- Django 4.2, Django REST Framework, SimpleJWT
-- PostgreSQL + Redis
-- Celery 5
-- AWS S3 (opcional) mediante django-storages
-- OpenAI Python SDK
 
-## Estructura principal
+- Django 4.2 + Django REST Framework 3.15
+- PostgreSQL como base principal
+- SimpleJWT para autenticacion
+- Firebase Admin para login mobile (Google y email)
+- OpenAI 1.45 (modelo `gpt-4.1-mini`)
+- django-storages + boto3 contra Supabase S3 para imagenes
+- Celery + Channels disponibles (queued, no activos en el plan actual)
+- Despliegue en Render con Docker, Postgres externo y storage en Supabase
+
+## Arquitectura
+
+```
+badgeup/         configuracion, settings env-driven, ASGI
+users/           User custom (email unico, points, avatar), JWT, Google/Firebase, leaderboard
+albums/          Album, Sticker, ScanLog, GlobalScanView (entrada principal de captura)
+achievements/    UserSticker, CapturePhoto, services.analyze_photo_global con OpenAI
+```
+
+Optimizaciones aplicadas:
+
+- Prefetch con `to_attr` y annotations en queries de listado para evitar N+1.
+- Cache por instancia en serializers que dependen de `user_stickers`.
+- `pagination_class = None` en endpoints donde el dataset esta naturalmente acotado (por ejemplo el mapa personal).
+- Llamadas a notificaciones envueltas en try/except para tolerar la ausencia de Redis en el plan free.
+
+## Flujo de captura
+
+1. La app envia una foto a `POST /api/scan/`.
+2. El backend pasa la imagen a `analyze_photo_global`, que arma un prompt con el catalogo de stickers candidatos del album seleccionado o de todos los albums activos.
+3. La IA responde con un array `matches[]`.
+4. Por cada match aprobado se crea un `UserSticker`, se sube la foto a Supabase S3 y se suman puntos.
+5. La respuesta incluye `all_unlocked` y `unlock_count` para que el cliente muestre el resultado completo.
+
+## Endpoints
+
+Algunas rutas relevantes:
+
+```
+POST  /api/auth/register/
+POST  /api/auth/login/
+POST  /api/auth/google/mobile/
+GET   /api/auth/profile/
+GET   /api/auth/leaderboard/
+
+GET   /api/albums/
+GET   /api/albums/<id>/
+POST  /api/albums/                   admin
+POST  /api/stickers/                 admin
+
+POST  /api/scan/                     captura principal con IA
+GET   /api/scan-logs/                historial de scans
+GET   /api/captures/history/         capturas aprobadas del usuario
+GET   /api/stickers/locations/       pins del mapa personal
+```
+
+Todas las rutas (excepto registro, login y leaderboard) requieren `Authorization: Bearer <jwt>`.
+
+## Estructura del repo
+
 ```
 badgeup-backend/
-├── badgeup/            # Configuración central, Celery, URLs
-├── users/              # Modelo de usuario, registro, JWT, perfil
-├── albums/             # Álbumes y stickers
-├── achievements/       # Desbloqueo y validación de stickers
-├── Dockerfile          # Imagen base del proyecto
-├── docker-compose.yml  # Servicios web, postgres, redis, celery
-├── requirements.txt
-└── README.md
+├── badgeup/
+├── users/
+├── albums/
+├── achievements/
+├── render.yaml
+├── Dockerfile
+└── requirements.txt
 ```
 
-## Requisitos
-- Docker y Docker Compose
-- (Opcional) Python 3.9+ y virtualenv si quieres ejecutar sin Docker
+## Cliente
 
-## Configuración inicial
-1. Copia el archivo de variables de entorno:
-   ```bash
-   cp .env.example .env
-   ```
-2. Ajusta valores sensibles (`DJANGO_SECRET_KEY`, claves de OpenAI, etc.).
-
-### Variables clave
-| Variable | Descripción |
-| --- | --- |
-| `DJANGO_SECRET_KEY` | Secreto de Django |
-| `POSTGRES_*` | Configuración de base de datos |
-| `CELERY_BROKER_URL` | Broker (por defecto Redis) |
-| `USE_S3` + `AWS_*` | Habilita almacenamiento en S3 |
-| `OPENAI_API_KEY` | Para validación de fotos (modo simulación si vacío) |
-
-## Levantar con Docker
-```bash
-docker compose up --build
-```
-Servicios incluidos:
-- `web`: aplicación Django (dev server)
-- `celery`: worker para tareas
-- `db`: PostgreSQL 15
-- `redis`: cola para Celery
-
-### Comandos útiles dentro del contenedor
-```bash
-docker compose exec web python manage.py migrate
-docker compose exec web python manage.py createsuperuser
-docker compose exec web python manage.py shell
-```
-El worker de Celery se reiniciará solo con cada cambio, usa Redis como broker (`redis://redis:6379/0`).
-
-## Ejecución local sin Docker
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-export DJANGO_DEBUG=True  # y el resto de variables necesarias
-python manage.py migrate
-python manage.py runserver
-```
-Para lanzar el worker local:
-```bash
-celery -A badgeup worker -l info
-```
-
-## Flujo de validación de stickers
-1. El usuario hace POST a `/api/stickers/<id>/unlock/` con `photo` (archivo) o `photo_url`.
-2. Se genera/actualiza un `UserSticker` y se envía una tarea Celery `validate_user_sticker`.
-3. La tarea llama a `achievements.services.analyze_user_sticker`:
-   - Si no hay `OPENAI_API_KEY`, aprueba automáticamente y añade notas de simulación.
-   - Si hay API key, usa `OpenAI Responses` con un prompt simple (vision multimodal).
-4. Si la foto se aprueba, el usuario recibe puntos (`Sticker.reward_points`).
-
-## Endpoints relevantes
-| Método | Endpoint | Descripción |
-| --- | --- | --- |
-| `POST` | `/api/auth/register/` | Registro de usuario |
-| `POST` | `/api/auth/login/` | Login + JWT (payload incluye datos del usuario) |
-| `POST` | `/api/auth/token/refresh/` | Refrescar JWT |
-| `GET/PATCH` | `/api/auth/profile/` | Perfil del usuario logueado |
-| `GET` | `/api/auth/leaderboard/` | Top usuarios (por puntos) |
-| `GET` | `/api/albums/` | Listado de álbumes |
-| `GET` | `/api/albums/<id>/` | Detalle con stickers |
-| `GET` | `/api/albums/stickers/<id>/` | Detalle de un sticker |
-| `POST` | `/api/stickers/<id>/unlock/` | Subir foto y lanzar validación |
-
-Todas las rutas (salvo registro/login/leaderboard) requieren autenticación con `Authorization: Bearer <token>`.
-
-## Migrations & administración
-```bash
-python manage.py makemigrations
-python manage.py migrate
-python manage.py createsuperuser
-```
-Panel admin disponible en `/admin/`.
-
-## Testing y próximos pasos
-- Añadir suite de tests (pytest o unittest + factory_boy) para validar flujos clave.
-- Completar lógica real de validación (geolocalización, prompts detallados, reintentos).
-- Configurar CI/CD (GitLab CI) con ejecución de tests y despliegue.
-- Añadir documentación OpenAPI (e.g., drf-spectacular).
-
-¡Listo! El backend queda preparado para conectar con tu frontend React y seguir iterando la experiencia de BadgeUp.
-
-## Validación de stickers con OpenAI Vision
-
-El backend puede usar OpenAI (visión) para validar si la foto del usuario coincide con el sticker:
-
-- Configuración:
-  - Añade `OPENAI_API_KEY` en `.env` (ya soportado en `settings.py`).
-  - `USE_OPENAI_STICKER_VALIDATION` se activa automáticamente si hay API key.
-- Dependencia: `openai>=1.0.0` (incluida en `requirements.txt`).
-- Flujo:
-  1. El usuario sube foto (UserSticker).
-  2. La tarea Celery `validate_user_sticker` llama a `achievements.services.analyze_user_sticker`.
-  3. Se envían a OpenAI la imagen de referencia del sticker, la foto del usuario y un prompt con nombre/álbum/descr.
-  4. OpenAI responde JSON: `{"match_score": 0-1, "is_match": bool, "reason": "..."}`.
-  5. Si `is_match=true` y `match_score>=0.6`, se aprueba; de lo contrario se rechaza. El score y notas se guardan en `validation_score` y `validation_notes`.
-  6. Si no hay API key, se autoaprueba (modo dev) para no romper el flujo.
-- Prueba manual:
-  - Crea un sticker “Dodge Charger SRT Hellcat 2015–2023” con imagen de referencia.
-  - Envía una foto real de un Hellcat como evidencia (POST `/api/stickers/<id>/unlock/` con `photo`).
-  - La tarea debería dejar el UserSticker en `approved` con un `validation_score` alto.
-- Ejemplo de payload enviado a OpenAI (resumen):
-  - Modelo: `gpt-4.1-mini`
-  - Input: prompt con texto del sticker + imágenes [`sticker.image_reference`, `user_sticker.photo`]
-  - Respuesta esperada (JSON): `{"match_score":0.78,"is_match":true,"reason":"Coincide con Charger Hellcat 2015-2023"}`
+El cliente oficial es la app mobile de BadgeUp en Flutter (iOS), repo aparte: <https://github.com/BadgeUp-App/badgeup-mobile>.
