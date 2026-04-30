@@ -364,14 +364,17 @@ class MatchAlbumPhotoView(APIView):
             location_lng=user_sticker.location_lng,
         )
 
-        send_notification(
-            get_friend_ids(request.user.id),
-            {
-                "title": "Captura de amigo",
-                "message": f"{request.user.username} desbloqueó {sticker.name}",
-                "category": "sticker_unlock",
-            },
-        )
+        try:
+            send_notification(
+                get_friend_ids(request.user.id),
+                {
+                    "title": "Captura de amigo",
+                    "message": f"{request.user.username} desbloqueó {sticker.name}",
+                    "category": "sticker_unlock",
+                },
+            )
+        except Exception:
+            logger.debug("send_notification skipped (no channels backend)")
 
         serializer = StickerSerializer(
             sticker, context={"request": request, "user": request.user}
@@ -571,6 +574,21 @@ class GlobalScanView(APIView):
                         "title": "Captura de amigo",
                         "message": f"{request.user.username} desbloqueo {sticker.name}",
                         "category": "sticker_unlock",
+                    },
+                )
+            except Exception:
+                pass
+
+            try:
+                from users.push import send_push
+                send_push(
+                    request.user,
+                    title="Sticker desbloqueado",
+                    body=f"Conseguiste {sticker.name} ({sticker.reward_points} pts)",
+                    data={
+                        "type": "sticker_unlock",
+                        "sticker_id": sticker.id,
+                        "album_id": sticker.album_id,
                     },
                 )
             except Exception:

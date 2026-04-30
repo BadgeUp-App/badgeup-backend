@@ -122,14 +122,17 @@ class FriendRequestListCreateView(generics.ListCreateAPIView):
             to_user=target,
             status=FriendRequest.STATUS_PENDING,
         )
-        send_notification(
-            [target.id],
-            {
-                "title": "Solicitud de amistad",
-                "message": f"{request.user.username} quiere agregarte",
-                "category": "friend_request",
-            },
-        )
+        try:
+            send_notification(
+                [target.id],
+                {
+                    "title": "Solicitud de amistad",
+                    "message": f"{request.user.username} quiere agregarte",
+                    "category": "friend_request",
+                },
+            )
+        except Exception:
+            pass
         serializer = self.get_serializer(friend_request)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -148,14 +151,17 @@ class FriendRequestActionView(APIView):
             fr.status = FriendRequest.STATUS_ACCEPTED
             fr.responded_at = timezone.now()
             fr.save(update_fields=["status", "responded_at"])
-            send_notification(
-                [fr.from_user_id],
-                {
-                    "title": "Solicitud aceptada",
-                    "message": f"{request.user.username} ahora es tu amigo",
-                    "category": "friend_accept",
-                },
-            )
+            try:
+                send_notification(
+                    [fr.from_user_id],
+                    {
+                        "title": "Solicitud aceptada",
+                        "message": f"{request.user.username} ahora es tu amigo",
+                        "category": "friend_accept",
+                    },
+                )
+            except Exception:
+                pass
         elif action == "reject":
             if fr.to_user != request.user or fr.status != FriendRequest.STATUS_PENDING:
                 return Response({"detail": "No puedes rechazar esta solicitud."}, status=status.HTTP_400_BAD_REQUEST)

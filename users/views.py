@@ -478,3 +478,30 @@ class ChangePasswordView(APIView):
             {"detail": "Contrasena actualizada."},
             status=status.HTTP_200_OK,
         )
+
+
+class DeviceTokenView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        token = (request.data.get("token") or "").strip()
+        platform = (request.data.get("platform") or "").strip().lower()
+        if not token:
+            return Response(
+                {"detail": "token requerido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = request.user
+        user.fcm_token = token[:512]
+        user.fcm_platform = platform[:16]
+        user.fcm_updated_at = timezone.now()
+        user.save(update_fields=["fcm_token", "fcm_platform", "fcm_updated_at"])
+        return Response({"detail": "ok"}, status=status.HTTP_200_OK)
+
+    def delete(self, request, *args, **kwargs):
+        user = request.user
+        user.fcm_token = ""
+        user.fcm_platform = ""
+        user.save(update_fields=["fcm_token", "fcm_platform"])
+        return Response(status=status.HTTP_204_NO_CONTENT)

@@ -1,9 +1,13 @@
+import logging
+
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.apps import apps
 from django.db.models import Sum
 
 from .models import FriendRequest, UserSticker
+
+logger = logging.getLogger(__name__)
 
 
 def get_friend_ids(user_id: int) -> list[int]:
@@ -19,16 +23,19 @@ def get_friend_ids(user_id: int) -> list[int]:
 
 
 def send_notification(user_ids: list[int], payload: dict, broadcast: bool = False):
-    channel_layer = get_channel_layer()
-    if not channel_layer:
-        return
-    if broadcast:
-        async_to_sync(channel_layer.group_send)("broadcast", {"type": "notification", "payload": payload})
-    for uid in user_ids:
-        async_to_sync(channel_layer.group_send)(
-            f"user_{uid}",
-            {"type": "notification", "payload": payload},
-        )
+    try:
+        channel_layer = get_channel_layer()
+        if not channel_layer:
+            return
+        if broadcast:
+            async_to_sync(channel_layer.group_send)("broadcast", {"type": "notification", "payload": payload})
+        for uid in user_ids:
+            async_to_sync(channel_layer.group_send)(
+                f"user_{uid}",
+                {"type": "notification", "payload": payload},
+            )
+    except Exception:
+        logger.debug("send_notification failed; continuing without delivery", exc_info=True)
 
 
 def compute_user_points(user) -> int:
