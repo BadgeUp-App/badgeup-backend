@@ -56,7 +56,7 @@ def _sticker_reference_payload(sticker: Sticker) -> Optional[Dict[str, Any]]:
     return None
 
 
-def analyze_car_photo(photo_file, stickers: Iterable[Sticker]) -> dict[str, Any] | None:
+def analyze_car_photo(photo_file, stickers: Iterable[Sticker]) -> Optional[Dict[str, Any]]:
     """
     Analiza la foto con OpenAI y regresa un JSON con recognized/make/model/.../fun_fact.
     """
@@ -147,7 +147,7 @@ def analyze_car_photo(photo_file, stickers: Iterable[Sticker]) -> dict[str, Any]
     return data
 
 
-def analyze_photo_global(photo_file, albums_qs) -> dict[str, Any] | None:
+def analyze_photo_global(photo_file, albums_qs) -> Optional[Dict[str, Any]]:
     if not settings.USE_OPENAI_STICKER_VALIDATION:
         return {"error": "validacion por IA deshabilitada"}
 

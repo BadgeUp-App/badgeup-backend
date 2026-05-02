@@ -32,6 +32,7 @@ class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "register"
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -71,6 +72,7 @@ class BadgeupTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 class BadgeupTokenObtainPairView(TokenObtainPairView):
     serializer_class = BadgeupTokenObtainPairSerializer
+    throttle_scope = "login"
 
 
 class ProfileView(generics.RetrieveUpdateAPIView):
@@ -189,6 +191,7 @@ class GoogleMobileLoginView(APIView):
     """
 
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "login"
 
     def post(self, request, *args, **kwargs):
         access_token = request.data.get("access_token")
@@ -265,6 +268,7 @@ class FirebaseLoginView(APIView):
     """Recibe un ID token de Firebase y devuelve un par de tokens BadgeUp."""
 
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "login"
 
     def post(self, request, *args, **kwargs):
         id_token = request.data.get("id_token")
@@ -377,6 +381,7 @@ class AdminUserDeleteView(generics.DestroyAPIView):
 
 class PasswordResetRequestView(APIView):
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "password_reset"
 
     def post(self, request, *args, **kwargs):
         email = (request.data.get("email") or "").strip().lower()
@@ -406,12 +411,12 @@ class PasswordResetRequestView(APIView):
             )
         except Exception:
             pass
-        print(f"[PASSWORD RESET] {email} -> code: {code}")
         return Response({"detail": generic_msg}, status=status.HTTP_200_OK)
 
 
 class PasswordResetConfirmView(APIView):
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "password_reset"
 
     def post(self, request, *args, **kwargs):
         email = (request.data.get("email") or "").strip().lower()

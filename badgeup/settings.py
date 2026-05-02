@@ -23,10 +23,22 @@ def env_list(key: str, default: str = "") -> list[str]:
 
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "change-me-in-production")
-DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
-ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "*")
+DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "")
 
-CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000")
+CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS", "")
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = os.getenv("DJANGO_SECURE_SSL_REDIRECT", "True").lower() == "true"
+    SECURE_HSTS_SECONDS = int(os.getenv("DJANGO_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = "same-origin"
+    X_FRAME_OPTIONS = "DENY"
 
 
 
@@ -41,6 +53,7 @@ INSTALLED_APPS = [
     "channels",
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "storages",
     # Local apps
@@ -86,34 +99,41 @@ ASGI_APPLICATION = "badgeup.asgi.application"
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 DATABASE_FALLBACK = os.getenv("DATABASE_FALLBACK", "true").lower() == "true"
 
+_db_resolved = False
 if DATABASE_URL:
     import dj_database_url
     _parsed = dj_database_url.parse(DATABASE_URL)
-    try:
-        import psycopg2
-        psycopg2.connect(
-            host=_parsed["HOST"],
-            port=_parsed["PORT"],
-            user=_parsed["USER"],
-            password=_parsed["PASSWORD"],
-            dbname=_parsed["NAME"],
-            connect_timeout=5,
-        ).close()
+    if DATABASE_URL.startswith("sqlite"):
         DATABASES = {"default": _parsed}
-    except Exception:
-        if DATABASE_FALLBACK:
-            DATABASES = {
-                "default": {
-                    "ENGINE": "django.db.backends.postgresql",
-                    "NAME": os.getenv("POSTGRES_DB", "badgeup_db"),
-                    "USER": os.getenv("POSTGRES_USER", "badgeup"),
-                    "PASSWORD": os.getenv("POSTGRES_PASSWORD", "badgeup"),
-                    "HOST": os.getenv("POSTGRES_HOST", "db"),
-                    "PORT": os.getenv("POSTGRES_PORT", "5432"),
-                }
-            }
-        else:
+        _db_resolved = True
+    else:
+        try:
+            import psycopg2
+            psycopg2.connect(
+                host=_parsed["HOST"],
+                port=_parsed["PORT"],
+                user=_parsed["USER"],
+                password=_parsed["PASSWORD"],
+                dbname=_parsed["NAME"],
+                connect_timeout=5,
+            ).close()
             DATABASES = {"default": _parsed}
+            _db_resolved = True
+        except Exception:
+            if DATABASE_FALLBACK:
+                DATABASES = {
+                    "default": {
+                        "ENGINE": "django.db.backends.postgresql",
+                        "NAME": os.getenv("POSTGRES_DB", "badgeup_db"),
+                        "USER": os.getenv("POSTGRES_USER", "badgeup"),
+                        "PASSWORD": os.getenv("POSTGRES_PASSWORD", "badgeup"),
+                        "HOST": os.getenv("POSTGRES_HOST", "db"),
+                        "PORT": os.getenv("POSTGRES_PORT", "5432"),
+                    }
+                }
+            else:
+                DATABASES = {"default": _parsed}
+            _db_resolved = True
 else:
     DATABASES = {
         "default": {
@@ -185,6 +205,19 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.ScopedRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "60/hour",
+        "user": "1000/hour",
+        "login": "10/minute",
+        "register": "5/hour",
+        "scan": "60/hour",
+        "password_reset": "5/hour",
+    },
 }
 
 
@@ -192,8 +225,11 @@ _cors_origins = env_list("CORS_ALLOWED_ORIGINS")
 if _cors_origins:
     CORS_ALLOW_ALL_ORIGINS = False
     CORS_ALLOWED_ORIGINS = _cors_origins
-else:
+elif DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
+else:
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = []
 CORS_ALLOW_CREDENTIALS = True
 
 
@@ -205,6 +241,9 @@ SIMPLE_JWT = {
         days=int(os.getenv("REFRESH_TOKEN_LIFETIME_DAYS", "7"))
     ),
     "AUTH_HEADER_TYPES": ("Bearer",),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "UPDATE_LAST_LOGIN": True,
 }
 
 

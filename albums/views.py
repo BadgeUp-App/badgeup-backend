@@ -55,7 +55,7 @@ def _prefetch_user_stickers(qs, user):
 
 
 class AlbumListCreateView(generics.ListCreateAPIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         return _annotated_album_qs(self.request.user)
@@ -395,6 +395,7 @@ class MatchAlbumPhotoView(APIView):
 
 class GlobalScanView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    throttle_scope = "scan"
 
     def post(self, request):
         if not settings.USE_OPENAI_STICKER_VALIDATION or not settings.OPENAI_API_KEY:

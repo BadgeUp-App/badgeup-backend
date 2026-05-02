@@ -18,3 +18,5 @@ staticfiles/
 
 # OS files
 .DS_Store
+.venv/
+test_db.sqlite3
