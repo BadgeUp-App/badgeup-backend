@@ -75,11 +75,14 @@ class BadgeupTokenObtainPairView(TokenObtainPairView):
     throttle_scope = "login"
 
 
-class ProfileView(generics.RetrieveUpdateAPIView):
+class ProfileView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = UserSerializer
 
     def get_object(self):
         return self.request.user
+
+    def perform_destroy(self, instance):
+        instance.delete()
 
 
 class LeaderboardView(generics.ListAPIView):
