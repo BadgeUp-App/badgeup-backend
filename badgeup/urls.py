@@ -19,6 +19,7 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path
+from django.views.generic import TemplateView
 
 from albums.views import GlobalScanView
 
@@ -35,6 +36,8 @@ urlpatterns = [
     path("api/stickers/", include("albums.sticker_urls")),
     path("api/scan/", GlobalScanView.as_view(), name="global-scan"),
     path("api/", include("achievements.urls")),
+    path("privacy/", TemplateView.as_view(template_name="privacy.html"), name="privacy"),
+    path("privacy", TemplateView.as_view(template_name="privacy.html")),
 ]
 
 if settings.DEBUG:
