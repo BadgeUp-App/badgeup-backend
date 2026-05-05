@@ -288,19 +288,33 @@ class ChatMessageView(generics.ListCreateAPIView):
         other = get_object_or_404(User, pk=other_id)
         instance = serializer.save(sender=user, recipient=other)
         payload = ChatMessageSerializer(instance, context={"request": self.request}).data
-        channel_layer = get_channel_layer()
-        group = chat_room_name(user.id, other_id)
-        async_to_sync(channel_layer.group_send)(group, {"type": "chat.message", "message": payload})
-        async_to_sync(channel_layer.group_send)(
-            f"user_{other_id}",
-            {
-                "type": "notification",
-                "payload": {
-                    "title": "Nuevo mensaje",
-                    "message": f"{user.username}: {(instance.text or '')[:80]}",
-                },
-            },
-        )
+        try:
+            channel_layer = get_channel_layer()
+            if channel_layer is not None:
+                group = chat_room_name(user.id, other_id)
+                async_to_sync(channel_layer.group_send)(group, {"type": "chat.message", "message": payload})
+                async_to_sync(channel_layer.group_send)(
+                    f"user_{other_id}",
+                    {
+                        "type": "notification",
+                        "payload": {
+                            "title": "Nuevo mensaje",
+                            "message": f"{user.username}: {(instance.text or '')[:80]}",
+                        },
+                    },
+                )
+        except Exception:
+            pass
+        try:
+            from users.push import send_push
+            send_push(
+                other,
+                title=user.username,
+                body=(instance.text or "")[:120],
+                data={"type": "chat", "from_user_id": str(user.id)},
+            )
+        except Exception:
+            pass
 
     def _is_friend(self, user_id: int, other_id: int) -> bool:
         if user_id == other_id:
