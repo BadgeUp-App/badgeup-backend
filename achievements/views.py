@@ -326,6 +326,22 @@ class ChatMessageView(generics.ListCreateAPIView):
         ).exists()
 
 
+class ChatInboxView(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ChatMessageSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        since_id = self.request.query_params.get("since_id")
+        qs = ChatMessage.objects.filter(recipient=user).select_related("sender", "recipient")
+        if since_id:
+            try:
+                qs = qs.filter(id__gt=int(since_id))
+            except (TypeError, ValueError):
+                pass
+        return qs.order_by("-id")[:50]
+
+
 class UserStickerHistoryView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = UserStickerHistorySerializer

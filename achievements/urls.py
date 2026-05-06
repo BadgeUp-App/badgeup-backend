@@ -11,6 +11,7 @@ from .views import (
     StickerUnlockView,
     UserStickerHistoryView,
     ChatMessageView,
+    ChatInboxView,
 )
 
 urlpatterns = [
@@ -40,4 +41,5 @@ urlpatterns = [
         name="friend-remove",
     ),
     path("chat/<int:other_id>/", ChatMessageView.as_view(), name="chat-messages"),
+    path("chat/inbox/recent/", ChatInboxView.as_view(), name="chat-inbox"),
 ]
