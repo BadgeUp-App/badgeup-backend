@@ -132,6 +132,7 @@ class MemberWithRelationSerializer(MemberSerializer):
 
 class ChatMessageSerializer(serializers.ModelSerializer):
     sender_id = serializers.IntegerField(source="sender.id", read_only=True)
+    sender_username = serializers.CharField(source="sender.username", read_only=True)
     recipient_id = serializers.IntegerField(source="recipient.id", read_only=True)
     file_url = serializers.SerializerMethodField()
 
@@ -140,13 +141,21 @@ class ChatMessageSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "sender_id",
+            "sender_username",
             "recipient_id",
             "text",
             "file",
             "file_url",
             "created_at",
         )
-        read_only_fields = ("id", "sender_id", "recipient_id", "created_at", "file_url")
+        read_only_fields = (
+            "id",
+            "sender_id",
+            "sender_username",
+            "recipient_id",
+            "created_at",
+            "file_url",
+        )
 
     def get_file_url(self, obj):
         request = self.context.get("request")
