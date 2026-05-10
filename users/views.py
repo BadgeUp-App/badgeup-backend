@@ -90,11 +90,25 @@ class LeaderboardView(generics.ListAPIView):
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
+        from django.db.models import Sum, Q, IntegerField
+        from django.db.models.functions import Coalesce
+        from achievements.models import UserSticker
+
         limit = int(self.request.query_params.get("limit", 20))
         limit = max(1, min(limit, 100))
         return (
             User.objects.filter(is_staff=False)
-            .order_by("-points")
+            .annotate(
+                live_points=Coalesce(
+                    Sum(
+                        "user_stickers__sticker__reward_points",
+                        filter=Q(user_stickers__status=UserSticker.STATUS_APPROVED),
+                    ),
+                    0,
+                    output_field=IntegerField(),
+                )
+            )
+            .order_by("-live_points", "-points")
             .prefetch_related("user_stickers")[:limit]
         )
 
