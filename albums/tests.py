@@ -1144,6 +1144,375 @@ class MatchAlbumPhotoTests(APITestCase):
         self.assertTrue(resp.data["unlocked"])
 
 
+class GlobalScanTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, Sticker
+
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="gscan", email="gs@a.com", password="S3curePass!2026"
+        )
+        self.album = Album.objects.create(title="GS-Album", theme="t", description="d")
+        self.s1 = Sticker.objects.create(album=self.album, name="ferrari-rojo")
+        self.s2 = Sticker.objects.create(album=self.album, name="lambo")
+
+    def _auth(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        return client
+
+    def _photo(self, color=(0, 0, 0)):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        import io
+
+        img = Image.new("RGB", (40, 40), color=color)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        return SimpleUploadedFile(
+            "scan.jpg", buf.getvalue(), content_type="image/jpeg"
+        )
+
+    def test_disabled_returns_message(self):
+        from django.test import override_settings
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=False, OPENAI_API_KEY=""):
+            resp = client.post(
+                reverse("global-scan"), {"photo": self._photo()}, format="multipart"
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["unlocked"])
+
+    def test_missing_photo_returns_400(self):
+        from django.test import override_settings
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"):
+            resp = client.post(reverse("global-scan"), {}, format="multipart")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_quota_exceeded_returns_429(self):
+        from django.test import override_settings
+        from albums.models import ScanQuotaUsage
+        from django.utils import timezone
+
+        ScanQuotaUsage.objects.create(
+            user=self.user, date=timezone.localdate(), count=5
+        )
+        client = self._auth()
+        with override_settings(
+            USE_OPENAI_STICKER_VALIDATION=True,
+            OPENAI_API_KEY="x",
+            MAX_SCANS_PER_DAY_FREE=5,
+        ):
+            resp = client.post(
+                reverse("global-scan"), {"photo": self._photo()}, format="multipart"
+            )
+        self.assertEqual(resp.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertTrue(resp.data["quota_exceeded"])
+
+    def test_analyzer_returns_none(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"), \
+             patch("albums.views.analyze_photo_global", return_value=None):
+            resp = client.post(
+                reverse("global-scan"), {"photo": self._photo()}, format="multipart"
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["unlocked"])
+
+    def test_unrecognized_creates_scan_log(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+        from albums.models import ScanLog
+
+        client = self._auth()
+        before = ScanLog.objects.count()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"), \
+             patch(
+                 "albums.views.analyze_photo_global",
+                 return_value={
+                     "recognized": False,
+                     "matches": [],
+                     "fun_fact": "nada reconocible",
+                     "item_count": 0,
+                 },
+             ):
+            resp = client.post(
+                reverse("global-scan"),
+                {"photo": self._photo(color=(50, 50, 50))},
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["unlocked"])
+        self.assertEqual(ScanLog.objects.count(), before + 1)
+
+    def test_match_with_sticker_unlocks(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+        from achievements.models import UserSticker
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"), \
+             patch(
+                 "albums.views.analyze_photo_global",
+                 return_value={
+                     "recognized": True,
+                     "matches": [
+                         {
+                             "detected_item": "ferrari rojo",
+                             "detected_category": "auto",
+                             "confidence": 0.92,
+                             "sticker_id": self.s1.id,
+                             "album_id": self.album.id,
+                             "reason": "match",
+                         }
+                     ],
+                     "fun_fact": "rojo italiano",
+                     "item_count": 1,
+                 },
+             ):
+            resp = client.post(
+                reverse("global-scan"),
+                {"photo": self._photo(color=(200, 0, 0)), "lat": "20.5", "lng": "-103.3"},
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["unlocked"])
+        us = UserSticker.objects.get(user=self.user, sticker=self.s1)
+        self.assertTrue(us.validated)
+        self.assertEqual(us.location_lat, 20.5)
+
+    def test_multi_match_returns_multiple_unlocks(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"), \
+             patch(
+                 "albums.views.analyze_photo_global",
+                 return_value={
+                     "recognized": True,
+                     "matches": [
+                         {
+                             "detected_item": "ferrari",
+                             "confidence": 0.92,
+                             "sticker_id": self.s1.id,
+                             "album_id": self.album.id,
+                         },
+                         {
+                             "detected_item": "lambo",
+                             "confidence": 0.91,
+                             "sticker_id": self.s2.id,
+                             "album_id": self.album.id,
+                         },
+                     ],
+                     "fun_fact": "dos autos",
+                 },
+             ):
+            resp = client.post(
+                reverse("global-scan"),
+                {"photo": self._photo(color=(100, 100, 0))},
+                format="multipart",
+            )
+        self.assertTrue(resp.data["unlocked"])
+        self.assertGreaterEqual(resp.data["unlock_count"], 2)
+
+    def test_low_confidence_match_is_rejected(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"), \
+             patch(
+                 "albums.views.analyze_photo_global",
+                 return_value={
+                     "recognized": True,
+                     "matches": [
+                         {
+                             "detected_item": "borroso",
+                             "confidence": 0.3,
+                             "sticker_id": self.s1.id,
+                             "album_id": self.album.id,
+                         }
+                     ],
+                     "fun_fact": "duda",
+                 },
+             ):
+            resp = client.post(
+                reverse("global-scan"),
+                {"photo": self._photo(color=(120, 120, 120))},
+                format="multipart",
+            )
+        self.assertFalse(resp.data["unlocked"])
+
+    def test_unknown_sticker_id_skipped(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"), \
+             patch(
+                 "albums.views.analyze_photo_global",
+                 return_value={
+                     "recognized": True,
+                     "matches": [
+                         {
+                             "detected_item": "fantasma",
+                             "confidence": 0.95,
+                             "sticker_id": 99999,
+                             "album_id": self.album.id,
+                         }
+                     ],
+                     "fun_fact": "???",
+                 },
+             ):
+            resp = client.post(
+                reverse("global-scan"),
+                {"photo": self._photo(color=(80, 80, 80))},
+                format="multipart",
+            )
+        self.assertFalse(resp.data["unlocked"])
+
+    def test_match_without_sticker_id_returns_rejected(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"), \
+             patch(
+                 "albums.views.analyze_photo_global",
+                 return_value={
+                     "recognized": True,
+                     "matches": [
+                         {
+                             "detected_item": "algo",
+                             "confidence": 0.95,
+                             "sticker_id": None,
+                             "album_id": self.album.id,
+                         }
+                     ],
+                     "fun_fact": "no hay sticker",
+                 },
+             ):
+            resp = client.post(
+                reverse("global-scan"),
+                {"photo": self._photo(color=(160, 160, 160))},
+                format="multipart",
+            )
+        self.assertFalse(resp.data["unlocked"])
+
+    def test_already_unlocked_adds_capture_photo(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+        from achievements.models import UserSticker, CapturePhoto
+
+        UserSticker.objects.create(
+            user=self.user,
+            sticker=self.s1,
+            validated=True,
+            status=UserSticker.STATUS_APPROVED,
+        )
+        before = CapturePhoto.objects.filter(
+            user_sticker__user=self.user, user_sticker__sticker=self.s1
+        ).count()
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"), \
+             patch(
+                 "albums.views.analyze_photo_global",
+                 return_value={
+                     "recognized": True,
+                     "matches": [
+                         {
+                             "detected_item": "ferrari",
+                             "confidence": 0.95,
+                             "sticker_id": self.s1.id,
+                             "album_id": self.album.id,
+                         }
+                     ],
+                 },
+             ):
+            resp = client.post(
+                reverse("global-scan"),
+                {"photo": self._photo(color=(200, 50, 50))},
+                format="multipart",
+            )
+        self.assertTrue(resp.data["unlocked"])
+        after = CapturePhoto.objects.filter(
+            user_sticker__user=self.user, user_sticker__sticker=self.s1
+        ).count()
+        self.assertEqual(after, before + 1)
+
+    def test_premium_user_no_quota_block(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+        from albums.models import ScanQuotaUsage
+        from django.utils import timezone
+
+        self.user.is_premium = True
+        self.user.save(update_fields=["is_premium"])
+        ScanQuotaUsage.objects.create(
+            user=self.user, date=timezone.localdate(), count=999
+        )
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"), \
+             patch(
+                 "albums.views.analyze_photo_global",
+                 return_value={
+                     "recognized": True,
+                     "matches": [
+                         {
+                             "detected_item": "ferrari",
+                             "confidence": 0.95,
+                             "sticker_id": self.s1.id,
+                             "album_id": self.album.id,
+                         }
+                     ],
+                 },
+             ):
+            resp = client.post(
+                reverse("global-scan"),
+                {"photo": self._photo(color=(50, 200, 50))},
+                format="multipart",
+            )
+        self.assertNotEqual(resp.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+    def test_response_includes_quota_info(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"), \
+             patch(
+                 "albums.views.analyze_photo_global",
+                 return_value={"recognized": False, "matches": [], "fun_fact": "x"},
+             ):
+            resp = client.post(
+                reverse("global-scan"),
+                {"photo": self._photo(color=(10, 10, 10))},
+                format="multipart",
+            )
+        self.assertIn("quota", resp.data)
+        self.assertIn("limit", resp.data["quota"])
+
+    def test_requires_auth(self):
+        from django.test import override_settings
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"):
+            resp = self.client.post(
+                reverse("global-scan"),
+                {"photo": self._photo()},
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
 class VisionPrefilterTests(APITestCase):
     def test_disabled_returns_none(self):
         from django.test import override_settings
