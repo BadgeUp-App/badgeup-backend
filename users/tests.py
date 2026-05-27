@@ -357,3 +357,231 @@ class DeviceTokenTests(APITestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class ProfileViewTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="prof", email="prof@a.com", password="S3curePass!2026"
+        )
+
+    def test_get_own_profile(self):
+        self.client.force_authenticate(self.user)
+        resp = self.client.get(reverse("profile"))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["username"], "prof")
+
+    def test_patch_own_profile_bio(self):
+        self.client.force_authenticate(self.user)
+        resp = self.client.patch(
+            reverse("profile"), {"bio": "new bio"}, format="json"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.bio, "new bio")
+
+    def test_get_profile_requires_auth(self):
+        resp = self.client.get(reverse("profile"))
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class LeaderboardTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.u1 = User.objects.create_user(
+            username="lb1", email="lb1@a.com", password="S3curePass!2026"
+        )
+        self.u2 = User.objects.create_user(
+            username="lb2", email="lb2@a.com", password="S3curePass!2026"
+        )
+        self.staff = User.objects.create_user(
+            username="lbadm", email="lbadm@a.com", password="S3curePass!2026", is_staff=True
+        )
+        self.u1.points = 100
+        self.u1.save(update_fields=["points"])
+        self.u2.points = 50
+        self.u2.save(update_fields=["points"])
+
+    def test_leaderboard_no_auth_required(self):
+        resp = self.client.get(reverse("leaderboard"))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_leaderboard_excludes_staff(self):
+        resp = self.client.get(reverse("leaderboard"))
+        items = resp.data.get("results", resp.data)
+        usernames = {u["username"] for u in items}
+        self.assertNotIn(self.staff.username, usernames)
+
+    def test_leaderboard_limit_query_param(self):
+        resp = self.client.get(reverse("leaderboard") + "?limit=1")
+        items = resp.data.get("results", resp.data)
+        self.assertLessEqual(len(items), 1)
+
+    def test_leaderboard_limit_clamped_high(self):
+        resp = self.client.get(reverse("leaderboard") + "?limit=99999")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_leaderboard_limit_clamped_low(self):
+        resp = self.client.get(reverse("leaderboard") + "?limit=0")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+
+class PublicUserProfileTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.viewer = User.objects.create_user(
+            username="viewer", email="v@a.com", password="S3curePass!2026"
+        )
+        self.target = User.objects.create_user(
+            username="target", email="t@a.com", password="S3curePass!2026"
+        )
+
+    def test_public_profile_visible(self):
+        self.client.force_authenticate(self.viewer)
+        resp = self.client.get(reverse("user-public-profile", args=[self.target.id]))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["username"], "target")
+
+    def test_public_profile_requires_auth(self):
+        resp = self.client.get(reverse("user-public-profile", args=[self.target.id]))
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_public_profile_404_for_unknown(self):
+        self.client.force_authenticate(self.viewer)
+        resp = self.client.get(reverse("user-public-profile", args=[99999]))
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class ChangePasswordTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="cp", email="cp@a.com", password="OldPassword!123"
+        )
+
+    def test_change_password_with_correct_old(self):
+        self.client.force_authenticate(self.user)
+        resp = self.client.post(
+            reverse("change-password"),
+            {"old_password": "OldPassword!123", "new_password": "NewPassword!456"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("NewPassword!456"))
+
+    def test_change_password_wrong_old(self):
+        self.client.force_authenticate(self.user)
+        resp = self.client.post(
+            reverse("change-password"),
+            {"old_password": "wrongOldPassword!", "new_password": "NewPassword!456"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_change_password_requires_auth(self):
+        resp = self.client.post(
+            reverse("change-password"),
+            {"old_password": "x", "new_password": "y"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class GoogleLoginStartTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_redirects_to_google(self):
+        resp = self.client.get(reverse("google-login"))
+        self.assertEqual(resp.status_code, status.HTTP_302_FOUND)
+        self.assertIn("accounts.google.com", resp.url)
+        self.assertIn("response_type=code", resp.url)
+
+
+class AdminUserManageTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.admin = User.objects.create_user(
+            username="aum", email="aum@a.com", password="S3curePass!2026", is_staff=True
+        )
+        self.regular = User.objects.create_user(
+            username="rum", email="rum@a.com", password="S3curePass!2026"
+        )
+
+    def test_admin_can_patch_user_bio(self):
+        self.client.force_authenticate(self.admin)
+        resp = self.client.patch(
+            reverse("user-admin-manage", args=[self.regular.id]),
+            {"bio": "admin set bio"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.regular.refresh_from_db()
+        self.assertEqual(self.regular.bio, "admin set bio")
+
+    def test_admin_can_reset_avatar_flag(self):
+        self.client.force_authenticate(self.admin)
+        self.regular.avatar = "avatars/test.png"
+        self.regular.save(update_fields=["avatar"])
+        resp = self.client.patch(
+            reverse("user-admin-manage", args=[self.regular.id]),
+            {"reset_avatar": True},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_regular_cannot_patch_user(self):
+        self.client.force_authenticate(self.regular)
+        resp = self.client.patch(
+            reverse("user-admin-manage", args=[self.regular.id]),
+            {"bio": "hack"},
+            format="json",
+        )
+        self.assertIn(resp.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
+
+    def test_admin_can_delete_user(self):
+        self.client.force_authenticate(self.admin)
+        victim = User.objects.create_user(
+            username="victim", email="victim@a.com", password="S3curePass!2026"
+        )
+        resp = self.client.delete(reverse("user-admin-delete", args=[victim.id]))
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(User.objects.filter(id=victim.id).exists())
+
+
+class PasswordResetTests2(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="pr", email="pr@a.com", password="OldPassword!123"
+        )
+        self.user.reset_code = "123456"
+        from datetime import timedelta
+        from django.utils import timezone
+        self.user.reset_code_expires = timezone.now() + timedelta(minutes=15)
+        self.user.save(update_fields=["reset_code", "reset_code_expires"])
+
+    def test_confirm_with_valid_code(self):
+        resp = self.client.post(
+            reverse("password-reset-confirm"),
+            {"email": "pr@a.com", "code": "123456", "new_password": "BrandNew!2026"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("BrandNew!2026"))
+
+    def test_confirm_with_expired_code(self):
+        from datetime import timedelta
+        from django.utils import timezone
+
+        self.user.reset_code_expires = timezone.now() - timedelta(minutes=1)
+        self.user.save(update_fields=["reset_code_expires"])
+        resp = self.client.post(
+            reverse("password-reset-confirm"),
+            {"email": "pr@a.com", "code": "123456", "new_password": "BrandNew!2026"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
