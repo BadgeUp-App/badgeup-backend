@@ -28,6 +28,18 @@ services:
         value: gpt-4.1-mini
       - key: MAX_SCANS_PER_DAY_FREE
         value: "5"
+      - key: VISION_CACHE_ENABLED
+        value: "True"
+      - key: VISION_PREFILTER_ENABLED
+        value: "True"
+      - key: VISION_PREFILTER_MODEL
+        value: gpt-4o-mini
+      - key: VISION_MAIN_COST_USD
+        value: "0.001"
+      - key: VISION_PREFILTER_COST_USD
+        value: "0.0001"
+      - key: OPENAI_DAILY_COST_LIMIT_USD
+        value: "20.0"
       - key: FRONTEND_URL
         value: "https://badgeup-backend.onrender.com"
       - key: DEFAULT_FROM_EMAIL

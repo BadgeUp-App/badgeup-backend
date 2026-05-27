@@ -697,6 +697,15 @@ class ScanQuotaView(APIView):
         return Response(get_remaining(request.user), status=status.HTTP_200_OK)
 
 
+class VisionCostStatusView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def get(self, request):
+        from . import vision_circuit
+
+        return Response(vision_circuit.get_today_state(), status=status.HTTP_200_OK)
+
+
 class StickerMessageView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

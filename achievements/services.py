@@ -151,6 +151,8 @@ def analyze_photo_global(photo_file, albums_qs) -> Optional[Dict[str, Any]]:
     if not settings.USE_OPENAI_STICKER_VALIDATION:
         return {"error": "validacion por IA deshabilitada"}
 
+    from albums import vision_cache, vision_circuit, vision_prefilter
+
     try:
         client = get_openai_client()
     except Exception:
@@ -168,6 +170,42 @@ def analyze_photo_global(photo_file, albums_qs) -> Optional[Dict[str, Any]]:
             photo_file.seek(0)
         except Exception:
             pass
+
+    phash = vision_cache.compute_dhash(raw)
+    if phash:
+        cached = vision_cache.lookup(phash)
+        if cached is not None:
+            vision_circuit.record_call(0.0, kind="cache_hit")
+            return cached
+
+    if vision_circuit.is_tripped():
+        logger.warning("vision circuit breaker tripped, rejecting scan")
+        return {
+            "recognized": False,
+            "item_count": 0,
+            "matches": [],
+            "fun_fact": "Estamos saturados hoy, intenta de nuevo manana.",
+            "circuit_tripped": True,
+        }
+
+    prefilter = vision_prefilter.is_collectible(raw)
+    if prefilter is not None:
+        vision_circuit.record_call(
+            float(getattr(settings, "VISION_PREFILTER_COST_USD", 0.0001)),
+            kind="prefilter",
+        )
+        if prefilter.get("collectible") is False:
+            reason = prefilter.get("reason") or "No detectamos nada coleccionable."
+            result = {
+                "recognized": False,
+                "item_count": 0,
+                "matches": [],
+                "fun_fact": reason,
+                "prefiltered": True,
+            }
+            if phash:
+                vision_cache.store(phash, result)
+            return result
 
     person_tags = {"personas", "profes", "estudiantes", "maestros"}
     catalog_lines = []
@@ -348,6 +386,11 @@ def analyze_photo_global(photo_file, albums_qs) -> Optional[Dict[str, Any]]:
         logger.exception("No se pudo parsear JSON de OpenAI (global scan)")
         return None
 
+    vision_circuit.record_call(
+        float(getattr(settings, "VISION_MAIN_COST_USD", 0.001)),
+        kind="main",
+    )
+
     data.setdefault("recognized", False)
     data.setdefault("item_count", data.get("vehicle_count", 0))
     data.setdefault("photo_category", "unknown")
@@ -372,6 +415,9 @@ def analyze_photo_global(photo_file, albums_qs) -> Optional[Dict[str, Any]]:
         m.setdefault("detected_item", "")
         m.setdefault("detected_category", "")
         m.setdefault("reason", "")
+
+    if phash:
+        vision_cache.store(phash, data)
 
     return data
 

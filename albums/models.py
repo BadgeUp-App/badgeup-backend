@@ -165,3 +165,33 @@ class ScanQuotaUsage(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user_id} {self.date} {self.count}"
+
+
+class VisionResultCache(models.Model):
+    phash = models.CharField(max_length=32, unique=True)
+    result_json = models.JSONField()
+    hit_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_hit_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["phash"])]
+        ordering = ["-last_hit_at"]
+
+    def __str__(self) -> str:
+        return f"{self.phash} hits={self.hit_count}"
+
+
+class DailyAICost(models.Model):
+    date = models.DateField(unique=True)
+    total_usd = models.DecimalField(max_digits=10, decimal_places=4, default=0)
+    call_count = models.PositiveIntegerField(default=0)
+    prefilter_count = models.PositiveIntegerField(default=0)
+    cache_hit_count = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-date"]
+
+    def __str__(self) -> str:
+        return f"{self.date} ${self.total_usd}"

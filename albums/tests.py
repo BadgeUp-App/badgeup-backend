@@ -198,3 +198,121 @@ class ScanQuotaTests(APITestCase):
             reserve_scan(self.free)
         allowed, _ = reserve_scan(other)
         self.assertTrue(allowed)
+
+
+class VisionDhashTests(APITestCase):
+    def test_dhash_deterministic_for_same_image(self):
+        from albums.vision_cache import compute_dhash
+        from PIL import Image
+        import io
+
+        img = Image.new("RGB", (100, 100))
+        for y in range(100):
+            for x in range(100):
+                img.putpixel((x, y), (x * 2 % 256, y * 2 % 256, (x + y) % 256))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        b1 = buf.getvalue()
+        buf2 = io.BytesIO()
+        img.save(buf2, format="JPEG", quality=85)
+        b2 = buf2.getvalue()
+        self.assertEqual(compute_dhash(b1), compute_dhash(b2))
+
+    def test_dhash_different_for_different_images(self):
+        from albums.vision_cache import compute_dhash
+        from PIL import Image
+        import io
+
+        a = Image.new("RGB", (100, 100), color=(0, 0, 0))
+        b = Image.new("RGB", (100, 100), color=(255, 255, 255))
+        for y in range(100):
+            for x in range(100):
+                a.putpixel((x, y), (x * 3 % 256, 0, 0))
+                b.putpixel((x, y), (0, y * 3 % 256, 0))
+        ba = io.BytesIO()
+        bb = io.BytesIO()
+        a.save(ba, format="JPEG")
+        b.save(bb, format="JPEG")
+        self.assertNotEqual(compute_dhash(ba.getvalue()), compute_dhash(bb.getvalue()))
+
+    def test_dhash_handles_invalid_bytes(self):
+        from albums.vision_cache import compute_dhash
+
+        self.assertIsNone(compute_dhash(b""))
+        self.assertIsNone(compute_dhash(b"not an image"))
+
+
+class VisionCacheTests(APITestCase):
+    def test_cache_store_and_lookup(self):
+        from albums.vision_cache import lookup, store
+
+        phash = "abcdef0123456789"
+        result = {"recognized": True, "matches": [{"sticker_id": 1}]}
+        store(phash, result)
+        cached = lookup(phash)
+        self.assertEqual(cached, result)
+
+    def test_cache_miss_returns_none(self):
+        from albums.vision_cache import lookup
+
+        self.assertIsNone(lookup("nonexistent_hash_zzz"))
+
+    def test_cache_store_idempotent(self):
+        from albums.vision_cache import store
+        from albums.models import VisionResultCache
+
+        store("dupe", {"x": 1})
+        store("dupe", {"x": 2})
+        self.assertEqual(VisionResultCache.objects.filter(phash="dupe").count(), 1)
+
+
+class VisionCircuitTests(APITestCase):
+    def test_no_calls_means_not_tripped(self):
+        from albums import vision_circuit
+
+        self.assertFalse(vision_circuit.is_tripped())
+
+    def test_record_and_get_state(self):
+        from albums import vision_circuit
+
+        vision_circuit.record_call(0.001, kind="main")
+        vision_circuit.record_call(0.0001, kind="prefilter")
+        vision_circuit.record_call(0.0, kind="cache_hit")
+        state = vision_circuit.get_today_state()
+        self.assertEqual(state["call_count"], 1)
+        self.assertEqual(state["prefilter_count"], 1)
+        self.assertEqual(state["cache_hit_count"], 1)
+        self.assertAlmostEqual(state["used_usd"], 0.0011, places=4)
+        self.assertFalse(state["tripped"])
+
+    def test_trips_when_limit_exceeded(self):
+        from decimal import Decimal
+        from django.utils import timezone
+        from albums.models import DailyAICost
+        from albums import vision_circuit
+
+        DailyAICost.objects.create(
+            date=timezone.localdate(), total_usd=Decimal("100.0"), call_count=10
+        )
+        self.assertTrue(vision_circuit.is_tripped())
+
+    def test_cost_status_requires_admin(self):
+        resp = self.client.get(reverse("scan-cost"))
+        self.assertIn(resp.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
+
+    def test_cost_status_admin_allowed(self):
+        admin = User.objects.create_user(
+            username="costadm", email="cost@a.com", password="S3curePass!2026", is_staff=True
+        )
+        login = self.client.post(
+            reverse("auth-login"),
+            {"username": admin.username, "password": "S3curePass!2026"},
+            format="json",
+        )
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        resp = client.get(reverse("scan-cost"))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn("limit_usd", resp.data)
+        self.assertIn("used_usd", resp.data)
+        self.assertIn("tripped", resp.data)
