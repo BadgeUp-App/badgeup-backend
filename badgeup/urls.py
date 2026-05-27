@@ -21,7 +21,7 @@ from django.http import JsonResponse
 from django.urls import include, path
 from django.views.generic import TemplateView
 
-from albums.views import GlobalScanView
+from albums.views import GlobalScanView, ScanQuotaView
 
 
 def health(_request):
@@ -35,6 +35,7 @@ urlpatterns = [
     path("api/albums/", include("albums.urls")),
     path("api/stickers/", include("albums.sticker_urls")),
     path("api/scan/", GlobalScanView.as_view(), name="global-scan"),
+    path("api/scan/quota/", ScanQuotaView.as_view(), name="scan-quota"),
     path("api/", include("achievements.urls")),
     path("privacy/", TemplateView.as_view(template_name="privacy.html"), name="privacy"),
     path("privacy", TemplateView.as_view(template_name="privacy.html")),

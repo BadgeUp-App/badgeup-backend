@@ -19,6 +19,9 @@ class User(AbstractUser):
     fcm_platform = models.CharField(max_length=16, blank=True, default="")
     fcm_updated_at = models.DateTimeField(blank=True, null=True)
 
+    is_premium = models.BooleanField(default=False)
+    premium_until = models.DateTimeField(blank=True, null=True)
+
     REQUIRED_FIELDS = ["email"]
 
     def __str__(self) -> str:

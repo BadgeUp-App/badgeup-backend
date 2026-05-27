@@ -411,6 +411,24 @@ class GlobalScanView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        from .quota import reserve_scan
+
+        allowed, quota_info = reserve_scan(request.user)
+        if not allowed:
+            limit = quota_info["limit"]
+            return Response(
+                {
+                    "unlocked": False,
+                    "quota_exceeded": True,
+                    "quota": quota_info,
+                    "message": (
+                        f"Llegaste al limite diario de {limit} capturas. "
+                        "Pasate a Premium para scans ilimitados."
+                    ),
+                },
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
         albums = Album.objects.prefetch_related("stickers").all()
         min_conf = float(os.getenv("MIN_VALIDATION_CONFIDENCE", "0.80"))
         try:
@@ -484,6 +502,7 @@ class GlobalScanView(APIView):
                 "unlocked": False,
                 "fun_fact": fun_fact,
                 "message": fun_fact or "No pudimos identificar algo reconocible en la foto.",
+                "quota": quota_info,
             })
 
         unlocked_stickers = []
@@ -648,6 +667,7 @@ class GlobalScanView(APIView):
                 "fun_fact": fun_fact,
                 "rejected": rejected_matches,
                 "message": msg,
+                "quota": quota_info,
             })
 
         first = unlocked_stickers[0]
@@ -664,7 +684,17 @@ class GlobalScanView(APIView):
             "reason": matches[0].get("reason", ""),
             "unlock_count": len(unlocked_stickers),
             "all_unlocked": unlocked_stickers,
+            "quota": quota_info,
         })
+
+
+class ScanQuotaView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from .quota import get_remaining
+
+        return Response(get_remaining(request.user), status=status.HTTP_200_OK)
 
 
 class StickerMessageView(APIView):

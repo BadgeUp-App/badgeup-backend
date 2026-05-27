@@ -146,3 +146,22 @@ class ScanLog(models.Model):
     def __str__(self) -> str:
         status = "match" if self.matched else "no match"
         return f"Scan {self.id}: {self.detected_items[:50] or 'unknown'} ({status})"
+
+
+class ScanQuotaUsage(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="scan_quotas",
+    )
+    date = models.DateField()
+    count = models.PositiveIntegerField(default=0)
+    last_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("user", "date")]
+        indexes = [models.Index(fields=["user", "date"])]
+        ordering = ["-date"]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} {self.date} {self.count}"

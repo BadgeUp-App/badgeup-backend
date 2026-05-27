@@ -26,6 +26,8 @@ services:
         value: "7"
       - key: OPENAI_MODEL
         value: gpt-4.1-mini
+      - key: MAX_SCANS_PER_DAY_FREE
+        value: "5"
       - key: FRONTEND_URL
         value: "https://badgeup-backend.onrender.com"
       - key: DEFAULT_FROM_EMAIL
