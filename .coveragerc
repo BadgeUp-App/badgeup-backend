@@ -1,0 +1,24 @@
+[run]
+branch = True
+source = albums,users,achievements,badgeup
+omit =
+    */migrations/*
+    */tests.py
+    */__init__.py
+    badgeup/asgi.py
+    badgeup/wsgi.py
+    manage.py
+    */admin.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+show_missing = True
+skip_covered = False
+precision = 2
+
+[html]
+directory = htmlcov

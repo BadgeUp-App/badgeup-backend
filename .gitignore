@@ -20,3 +20,6 @@ staticfiles/
 .DS_Store
 .venv/
 test_db.sqlite3
+test.sqlite3
+.coverage
+htmlcov/

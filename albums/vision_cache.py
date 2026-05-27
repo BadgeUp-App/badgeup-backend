@@ -3,7 +3,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.db.models import F
 from PIL import Image, UnidentifiedImageError
 
@@ -59,8 +59,8 @@ def store(phash: str, result: Dict[str, Any]) -> None:
     if not phash or not result or not is_enabled():
         return
     try:
-        VisionResultCache.objects.create(phash=phash, result_json=result)
-    except IntegrityError:
-        pass
+        VisionResultCache.objects.get_or_create(
+            phash=phash, defaults={"result_json": result}
+        )
     except Exception:
         logger.exception("vision_cache store failed for %s", phash)

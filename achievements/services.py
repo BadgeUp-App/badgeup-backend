@@ -154,12 +154,6 @@ def analyze_photo_global(photo_file, albums_qs) -> Optional[Dict[str, Any]]:
     from albums import vision_cache, vision_circuit, vision_prefilter
 
     try:
-        client = get_openai_client()
-    except Exception:
-        logger.exception("No se pudo inicializar el cliente de OpenAI")
-        return None
-
-    try:
         raw = photo_file.read()
         b64 = base64.b64encode(raw).decode("utf-8")
     except Exception:
@@ -206,6 +200,12 @@ def analyze_photo_global(photo_file, albums_qs) -> Optional[Dict[str, Any]]:
             if phash:
                 vision_cache.store(phash, result)
             return result
+
+    try:
+        client = get_openai_client()
+    except Exception:
+        logger.exception("No se pudo inicializar el cliente de OpenAI")
+        return None
 
     person_tags = {"personas", "profes", "estudiantes", "maestros"}
     catalog_lines = []

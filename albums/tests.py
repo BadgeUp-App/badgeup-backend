@@ -316,3 +316,308 @@ class VisionCircuitTests(APITestCase):
         self.assertIn("limit_usd", resp.data)
         self.assertIn("used_usd", resp.data)
         self.assertIn("tripped", resp.data)
+
+
+class QuotaEdgeCaseTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="edge", email="edge@a.com", password="S3curePass!2026"
+        )
+
+    def test_anonymous_user_returns_zero_limit(self):
+        from django.contrib.auth.models import AnonymousUser
+        from albums.quota import get_daily_limit
+
+        self.assertEqual(get_daily_limit(AnonymousUser()), 0)
+
+    def test_none_user_returns_zero_limit(self):
+        from albums.quota import get_daily_limit
+
+        self.assertEqual(get_daily_limit(None), 0)
+
+    def test_premium_with_no_expiration_is_unlimited(self):
+        from albums.quota import get_daily_limit
+
+        self.user.is_premium = True
+        self.user.premium_until = None
+        self.user.save(update_fields=["is_premium", "premium_until"])
+        self.assertIsNone(get_daily_limit(self.user))
+
+    def test_premium_with_future_expiration_is_unlimited(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from albums.quota import get_daily_limit
+
+        self.user.is_premium = True
+        self.user.premium_until = timezone.now() + timedelta(days=30)
+        self.user.save(update_fields=["is_premium", "premium_until"])
+        self.assertIsNone(get_daily_limit(self.user))
+
+    def test_get_remaining_unlimited_for_premium(self):
+        from albums.quota import get_remaining
+
+        self.user.is_premium = True
+        self.user.save(update_fields=["is_premium"])
+        info = get_remaining(self.user)
+        self.assertTrue(info["unlimited"])
+        self.assertIsNone(info["limit"])
+        self.assertIsNone(info["remaining"])
+
+    def test_get_remaining_with_prior_usage(self):
+        from albums.models import ScanQuotaUsage
+        from django.utils import timezone
+        from albums.quota import get_remaining
+
+        ScanQuotaUsage.objects.create(user=self.user, date=timezone.localdate(), count=3)
+        info = get_remaining(self.user)
+        self.assertEqual(info["used"], 3)
+        self.assertEqual(info["remaining"], 2)
+        self.assertIn("reset_at", info)
+
+    def test_next_reset_format_is_iso(self):
+        from albums.quota import _next_reset
+
+        out = _next_reset()
+        self.assertIsInstance(out, str)
+        self.assertIn("T", out)
+
+
+class VisionCacheEdgeTests(APITestCase):
+    def test_compute_dhash_none_input(self):
+        from albums.vision_cache import compute_dhash
+
+        self.assertIsNone(compute_dhash(None))
+
+    def test_compute_dhash_handles_pil_error(self):
+        from albums.vision_cache import compute_dhash
+
+        self.assertIsNone(compute_dhash(b"\x00\x01\x02not an image"))
+
+    def test_lookup_with_empty_phash_returns_none(self):
+        from albums.vision_cache import lookup
+
+        self.assertIsNone(lookup(""))
+        self.assertIsNone(lookup(None))
+
+    def test_lookup_when_disabled_returns_none(self):
+        from django.test import override_settings
+        from albums.vision_cache import lookup, store
+
+        store("disabled_test", {"x": 1})
+        with override_settings(VISION_CACHE_ENABLED=False):
+            self.assertIsNone(lookup("disabled_test"))
+
+    def test_store_with_empty_phash_is_noop(self):
+        from albums.vision_cache import store
+        from albums.models import VisionResultCache
+
+        before = VisionResultCache.objects.count()
+        store("", {"x": 1})
+        store(None, {"x": 1})
+        self.assertEqual(VisionResultCache.objects.count(), before)
+
+    def test_store_with_empty_result_is_noop(self):
+        from albums.vision_cache import store
+        from albums.models import VisionResultCache
+
+        before = VisionResultCache.objects.count()
+        store("hash", {})
+        store("hash", None)
+        self.assertEqual(VisionResultCache.objects.count(), before)
+
+    def test_lookup_increments_hit_count(self):
+        from albums.vision_cache import store, lookup
+        from albums.models import VisionResultCache
+
+        store("hitter", {"x": 1})
+        for _ in range(3):
+            lookup("hitter")
+        row = VisionResultCache.objects.get(phash="hitter")
+        self.assertEqual(row.hit_count, 3)
+
+    def test_lookup_swallows_db_exception(self):
+        from unittest.mock import patch
+        from albums.vision_cache import lookup
+
+        with patch(
+            "albums.vision_cache.VisionResultCache.objects"
+        ) as mocked:
+            mocked.select_for_update.side_effect = RuntimeError("db boom")
+            self.assertIsNone(lookup("nonexistent_phash"))
+
+    def test_store_swallows_db_exception(self):
+        from unittest.mock import patch
+        from albums.vision_cache import store
+
+        with patch(
+            "albums.vision_cache.VisionResultCache.objects"
+        ) as mocked:
+            mocked.get_or_create.side_effect = RuntimeError("db boom")
+            store("any_phash", {"x": 1})
+
+
+class VisionCircuitEdgeTests(APITestCase):
+    def test_get_daily_limit_usd_default(self):
+        from decimal import Decimal
+        from django.test import override_settings
+        from albums.vision_circuit import get_daily_limit_usd
+
+        with override_settings(OPENAI_DAILY_COST_LIMIT_USD="50.0"):
+            self.assertEqual(get_daily_limit_usd(), Decimal("50.0"))
+
+    def test_get_daily_limit_usd_invalid_falls_back(self):
+        from decimal import Decimal
+        from django.test import override_settings
+        from albums.vision_circuit import get_daily_limit_usd
+
+        with override_settings(OPENAI_DAILY_COST_LIMIT_USD="not-a-number"):
+            self.assertEqual(get_daily_limit_usd(), Decimal("20.0"))
+
+    def test_get_today_state_with_no_row(self):
+        from albums import vision_circuit
+
+        state = vision_circuit.get_today_state()
+        self.assertEqual(state["used_usd"], 0.0)
+        self.assertEqual(state["call_count"], 0)
+        self.assertFalse(state["tripped"])
+
+    def test_get_today_state_with_existing_row(self):
+        from decimal import Decimal
+        from django.utils import timezone
+        from albums.models import DailyAICost
+        from albums import vision_circuit
+
+        DailyAICost.objects.create(
+            date=timezone.localdate(),
+            total_usd=Decimal("1.5"),
+            call_count=10,
+            prefilter_count=5,
+            cache_hit_count=3,
+        )
+        state = vision_circuit.get_today_state()
+        self.assertEqual(state["used_usd"], 1.5)
+        self.assertEqual(state["call_count"], 10)
+        self.assertEqual(state["prefilter_count"], 5)
+        self.assertEqual(state["cache_hit_count"], 3)
+        self.assertGreater(state["remaining_usd"], 0)
+
+    def test_record_call_swallows_exception(self):
+        from unittest.mock import patch
+        from albums import vision_circuit
+
+        with patch(
+            "albums.vision_circuit.DailyAICost.objects"
+        ) as mocked:
+            mocked.select_for_update.side_effect = RuntimeError("db boom")
+            vision_circuit.record_call(0.001, kind="main")
+
+    def test_get_daily_limit_usd_decimal_fallback_on_invalid_object(self):
+        from decimal import Decimal
+        from django.test import override_settings
+        from albums.vision_circuit import get_daily_limit_usd
+
+        with override_settings(OPENAI_DAILY_COST_LIMIT_USD=object()):
+            self.assertEqual(get_daily_limit_usd(), Decimal("20.0"))
+
+    def test_record_call_unknown_kind_only_updates_total(self):
+        from django.utils import timezone
+        from albums import vision_circuit
+        from albums.models import DailyAICost
+
+        vision_circuit.record_call(0.5, kind="unknown")
+        row = DailyAICost.objects.get(date=timezone.localdate())
+        self.assertEqual(row.call_count, 0)
+        self.assertEqual(row.prefilter_count, 0)
+        self.assertEqual(row.cache_hit_count, 0)
+        self.assertAlmostEqual(float(row.total_usd), 0.5, places=4)
+
+
+class VisionPrefilterTests(APITestCase):
+    def test_disabled_returns_none(self):
+        from django.test import override_settings
+        from albums.vision_prefilter import is_collectible
+
+        with override_settings(VISION_PREFILTER_ENABLED=False):
+            self.assertIsNone(is_collectible(b"some bytes"))
+
+    def test_empty_bytes_returns_none(self):
+        from albums.vision_prefilter import is_collectible
+
+        self.assertIsNone(is_collectible(b""))
+        self.assertIsNone(is_collectible(None))
+
+    def test_collectible_true_response(self):
+        from unittest.mock import patch, MagicMock
+        from albums.vision_prefilter import is_collectible
+
+        fake_msg = MagicMock()
+        fake_msg.message.content = '{"collectible": true}'
+        fake_completion = MagicMock(choices=[fake_msg])
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.return_value = fake_completion
+
+        with patch("albums.vision_prefilter.get_openai_client", return_value=fake_client):
+            result = is_collectible(b"image bytes")
+            self.assertEqual(result, {"collectible": True})
+
+    def test_collectible_false_response(self):
+        from unittest.mock import patch, MagicMock
+        from albums.vision_prefilter import is_collectible
+
+        fake_msg = MagicMock()
+        fake_msg.message.content = '{"collectible": false, "reason": "borrosa"}'
+        fake_completion = MagicMock(choices=[fake_msg])
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.return_value = fake_completion
+
+        with patch("albums.vision_prefilter.get_openai_client", return_value=fake_client):
+            result = is_collectible(b"image bytes")
+            self.assertFalse(result["collectible"])
+            self.assertEqual(result["reason"], "borrosa")
+
+    def test_client_init_failure_returns_none(self):
+        from unittest.mock import patch
+        from albums.vision_prefilter import is_collectible
+
+        with patch(
+            "albums.vision_prefilter.get_openai_client",
+            side_effect=RuntimeError("no key"),
+        ):
+            self.assertIsNone(is_collectible(b"bytes"))
+
+    def test_completion_exception_returns_none(self):
+        from unittest.mock import patch, MagicMock
+        from albums.vision_prefilter import is_collectible
+
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.side_effect = RuntimeError("openai down")
+
+        with patch("albums.vision_prefilter.get_openai_client", return_value=fake_client):
+            self.assertIsNone(is_collectible(b"bytes"))
+
+    def test_malformed_json_returns_none(self):
+        from unittest.mock import patch, MagicMock
+        from albums.vision_prefilter import is_collectible
+
+        fake_msg = MagicMock()
+        fake_msg.message.content = "not valid json {"
+        fake_completion = MagicMock(choices=[fake_msg])
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.return_value = fake_completion
+
+        with patch("albums.vision_prefilter.get_openai_client", return_value=fake_client):
+            self.assertIsNone(is_collectible(b"bytes"))
+
+    def test_empty_content_handled(self):
+        from unittest.mock import patch, MagicMock
+        from albums.vision_prefilter import is_collectible
+
+        fake_msg = MagicMock()
+        fake_msg.message.content = None
+        fake_completion = MagicMock(choices=[fake_msg])
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.return_value = fake_completion
+
+        with patch("albums.vision_prefilter.get_openai_client", return_value=fake_client):
+            result = is_collectible(b"bytes")
+            self.assertEqual(result, {})
