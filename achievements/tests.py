@@ -277,3 +277,235 @@ class AnalyzePhotoGlobalTests(APITestCase):
             side_effect=RuntimeError("no openai"),
         ):
             self.assertIsNone(analyze_photo_global(self._fake_image_bytes(), []))
+
+
+class FriendRequestFlowTests(APITestCase):
+    def setUp(self):
+        self.alice = _make_user(username="al", email="al@test.com")
+        self.bob = _make_user(username="bo", email="bo@test.com")
+        self.eve = _make_user(username="ev", email="ev@test.com")
+
+    def test_send_request_creates_pending(self):
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(
+            reverse("friend-requests"),
+            {"to_user": self.bob.id},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["status"], FriendRequest.STATUS_PENDING)
+
+    def test_send_request_to_self_rejected(self):
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(
+            reverse("friend-requests"),
+            {"to_user": self.alice.id},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_send_request_missing_to_user(self):
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(reverse("friend-requests"), {}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_reverse_pending_auto_accepts(self):
+        FriendRequest.objects.create(from_user=self.bob, to_user=self.alice)
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(
+            reverse("friend-requests"),
+            {"to_user": self.bob.id},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["status"], FriendRequest.STATUS_ACCEPTED)
+
+    def test_resending_pending_returns_same(self):
+        fr = FriendRequest.objects.create(from_user=self.alice, to_user=self.bob)
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(
+            reverse("friend-requests"),
+            {"to_user": self.bob.id},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["id"], fr.id)
+
+    def test_send_after_rejected_reactivates(self):
+        FriendRequest.objects.create(
+            from_user=self.alice, to_user=self.bob, status=FriendRequest.STATUS_REJECTED
+        )
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(
+            reverse("friend-requests"),
+            {"to_user": self.bob.id},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["status"], FriendRequest.STATUS_PENDING)
+
+    def test_already_friends_returns_existing(self):
+        FriendRequest.objects.create(
+            from_user=self.alice, to_user=self.bob, status=FriendRequest.STATUS_ACCEPTED
+        )
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(
+            reverse("friend-requests"),
+            {"to_user": self.bob.id},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["status"], FriendRequest.STATUS_ACCEPTED)
+
+    def test_accept_request(self):
+        fr = FriendRequest.objects.create(from_user=self.bob, to_user=self.alice)
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(reverse("friend-request-accept", args=[fr.id]))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        fr.refresh_from_db()
+        self.assertEqual(fr.status, FriendRequest.STATUS_ACCEPTED)
+
+    def test_cannot_accept_others_request(self):
+        fr = FriendRequest.objects.create(from_user=self.bob, to_user=self.alice)
+        self.client.force_authenticate(self.eve)
+        resp = self.client.post(reverse("friend-request-accept", args=[fr.id]))
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_reject_request(self):
+        fr = FriendRequest.objects.create(from_user=self.bob, to_user=self.alice)
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(reverse("friend-request-reject", args=[fr.id]))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        fr.refresh_from_db()
+        self.assertEqual(fr.status, FriendRequest.STATUS_REJECTED)
+
+    def test_cancel_own_pending(self):
+        fr = FriendRequest.objects.create(from_user=self.alice, to_user=self.bob)
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(reverse("friend-request-cancel", args=[fr.id]))
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(FriendRequest.objects.filter(id=fr.id).exists())
+
+    def test_cannot_cancel_others_pending(self):
+        fr = FriendRequest.objects.create(from_user=self.bob, to_user=self.alice)
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(reverse("friend-request-cancel", args=[fr.id]))
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_remove_friend(self):
+        fr = FriendRequest.objects.create(
+            from_user=self.alice, to_user=self.bob, status=FriendRequest.STATUS_ACCEPTED
+        )
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(reverse("friend-remove", args=[fr.id]))
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_remove_only_works_on_accepted(self):
+        fr = FriendRequest.objects.create(
+            from_user=self.alice, to_user=self.bob, status=FriendRequest.STATUS_PENDING
+        )
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(reverse("friend-remove", args=[fr.id]))
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_remove_third_party_rejected(self):
+        fr = FriendRequest.objects.create(
+            from_user=self.alice, to_user=self.bob, status=FriendRequest.STATUS_ACCEPTED
+        )
+        self.client.force_authenticate(self.eve)
+        resp = self.client.post(reverse("friend-remove", args=[fr.id]))
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_friends_list_shows_accepted_only(self):
+        FriendRequest.objects.create(
+            from_user=self.alice, to_user=self.bob, status=FriendRequest.STATUS_ACCEPTED
+        )
+        FriendRequest.objects.create(
+            from_user=self.alice, to_user=self.eve, status=FriendRequest.STATUS_PENDING
+        )
+        self.client.force_authenticate(self.alice)
+        resp = self.client.get(reverse("friends-list"))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        items = resp.data.get("results", resp.data)
+        usernames = {u["username"] for u in items}
+        self.assertIn(self.bob.username, usernames)
+        self.assertNotIn(self.eve.username, usernames)
+
+    def test_filter_received_scope(self):
+        FriendRequest.objects.create(
+            from_user=self.bob, to_user=self.alice
+        )
+        self.client.force_authenticate(self.alice)
+        resp = self.client.get(reverse("friend-requests") + "?scope=received")
+        items = resp.data.get("results", resp.data)
+        self.assertEqual(len(items), 1)
+
+    def test_filter_sent_scope(self):
+        FriendRequest.objects.create(
+            from_user=self.alice, to_user=self.bob
+        )
+        self.client.force_authenticate(self.alice)
+        resp = self.client.get(reverse("friend-requests") + "?scope=sent")
+        items = resp.data.get("results", resp.data)
+        self.assertEqual(len(items), 1)
+
+
+class ChatInboxTests(APITestCase):
+    def setUp(self):
+        self.alice = _make_user(username="al2", email="al2@test.com")
+        self.bob = _make_user(username="bo2", email="bo2@test.com")
+        _be_friends(self.alice, self.bob)
+
+    def test_inbox_empty_initial(self):
+        self.client.force_authenticate(self.alice)
+        resp = self.client.get(reverse("chat-inbox"))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_inbox_lists_messages_to_me(self):
+        ChatMessage.objects.create(sender=self.bob, recipient=self.alice, text="hi")
+        self.client.force_authenticate(self.alice)
+        resp = self.client.get(reverse("chat-inbox"))
+        items = resp.data.get("results", resp.data)
+        self.assertEqual(len(items), 1)
+
+    def test_inbox_filters_since_id(self):
+        m1 = ChatMessage.objects.create(sender=self.bob, recipient=self.alice, text="m1")
+        m2 = ChatMessage.objects.create(sender=self.bob, recipient=self.alice, text="m2")
+        self.client.force_authenticate(self.alice)
+        resp = self.client.get(reverse("chat-inbox") + f"?since_id={m1.id}")
+        items = resp.data.get("results", resp.data)
+        ids = [m["id"] for m in items]
+        self.assertIn(m2.id, ids)
+        self.assertNotIn(m1.id, ids)
+
+
+class UserStickerHistoryTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, Sticker
+        from achievements.models import UserSticker
+
+        self.user_a = _make_user(username="histA", email="hA@test.com")
+        self.user_b = _make_user(username="histB", email="hB@test.com")
+        self.album = Album.objects.create(title="HistA", theme="t", description="d")
+        self.s1 = Sticker.objects.create(album=self.album, name="s1")
+        self.s2 = Sticker.objects.create(album=self.album, name="s2")
+        UserSticker.objects.create(
+            user=self.user_a, sticker=self.s1, validated=True,
+            status=UserSticker.STATUS_APPROVED,
+        )
+        UserSticker.objects.create(
+            user=self.user_b, sticker=self.s2, validated=True,
+            status=UserSticker.STATUS_APPROVED,
+        )
+
+    def test_history_returns_only_own_captures(self):
+        self.client.force_authenticate(self.user_a)
+        resp = self.client.get(reverse("user-sticker-history"))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        items = resp.data.get("results", resp.data)
+        for entry in items:
+            self.assertTrue(entry.get("sticker") or entry.get("id"))
+
+    def test_history_requires_auth(self):
+        resp = self.client.get(reverse("user-sticker-history"))
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
