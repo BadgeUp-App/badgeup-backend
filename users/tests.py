@@ -585,3 +585,193 @@ class PasswordResetTests2(APITestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class GoogleMobileLoginTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_missing_access_token(self):
+        resp = self.client.post(reverse("google-mobile"), {}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_invalid_token_rejected(self):
+        from unittest.mock import patch, MagicMock
+
+        fake_resp = MagicMock(status_code=401)
+        with patch("users.views.requests.get", return_value=fake_resp):
+            resp = self.client.post(
+                reverse("google-mobile"),
+                {"access_token": "bad-token"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_userinfo_without_email_rejected(self):
+        from unittest.mock import patch, MagicMock
+
+        fake_resp = MagicMock(status_code=200)
+        fake_resp.json.return_value = {"name": "Sin Email"}
+        with patch("users.views.requests.get", return_value=fake_resp):
+            resp = self.client.post(
+                reverse("google-mobile"),
+                {"access_token": "valid"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_valid_token_creates_new_user_and_returns_jwt(self):
+        from unittest.mock import patch, MagicMock
+
+        fake_resp = MagicMock(status_code=200)
+        fake_resp.json.return_value = {
+            "email": "new.google.user@gmail.com",
+            "given_name": "New",
+            "family_name": "Google",
+            "picture": None,
+        }
+        with patch("users.views.requests.get", return_value=fake_resp):
+            resp = self.client.post(
+                reverse("google-mobile"),
+                {"access_token": "valid"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn("access", resp.data)
+        self.assertIn("refresh", resp.data)
+        self.assertTrue(resp.data["created"])
+        self.assertTrue(User.objects.filter(email="new.google.user@gmail.com").exists())
+
+    def test_valid_token_returns_existing_user(self):
+        from unittest.mock import patch, MagicMock
+
+        existing = User.objects.create_user(
+            username="googled",
+            email="existing.google@gmail.com",
+            password="randompass",
+        )
+        fake_resp = MagicMock(status_code=200)
+        fake_resp.json.return_value = {
+            "email": "existing.google@gmail.com",
+            "given_name": "Ex",
+            "family_name": "Isting",
+        }
+        with patch("users.views.requests.get", return_value=fake_resp):
+            resp = self.client.post(
+                reverse("google-mobile"),
+                {"access_token": "valid"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["created"])
+        self.assertEqual(resp.data["user"]["id"], existing.id)
+
+    def test_username_collision_resolved_with_suffix(self):
+        from unittest.mock import patch, MagicMock
+
+        User.objects.create_user(
+            username="collision",
+            email="someone.else@gmail.com",
+            password="x",
+        )
+        fake_resp = MagicMock(status_code=200)
+        fake_resp.json.return_value = {
+            "email": "collision@gmail.com",
+            "given_name": "C",
+            "family_name": "X",
+        }
+        with patch("users.views.requests.get", return_value=fake_resp):
+            resp = self.client.post(
+                reverse("google-mobile"),
+                {"access_token": "valid"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        created_user = User.objects.get(email="collision@gmail.com")
+        self.assertNotEqual(created_user.username, "collision")
+
+
+class FirebaseLoginViewTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_missing_id_token(self):
+        resp = self.client.post(reverse("firebase-login"), {}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_invalid_firebase_token(self):
+        from unittest.mock import patch
+
+        with patch(
+            "users.views.firebase_verify_id_token",
+            return_value=(None, "Invalid token"),
+        ):
+            resp = self.client.post(
+                reverse("firebase-login"),
+                {"id_token": "bad-firebase-token"},
+                format="json",
+            )
+        self.assertIn(resp.status_code, (status.HTTP_400_BAD_REQUEST, status.HTTP_401_UNAUTHORIZED))
+
+    def test_valid_firebase_creates_user(self):
+        from unittest.mock import patch
+
+        fake_payload = {
+            "uid": "abc123",
+            "email": "firebase.user@test.com",
+            "name": "Firebase User",
+            "picture": None,
+        }
+        with patch(
+            "users.views.firebase_verify_id_token",
+            return_value=(fake_payload, None),
+        ):
+            resp = self.client.post(
+                reverse("firebase-login"),
+                {"id_token": "valid-token"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn("access", resp.data)
+        self.assertTrue(User.objects.filter(email="firebase.user@test.com").exists())
+
+
+class DeviceTokenExtendedTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="dev", email="dev@a.com", password="S3curePass!2026"
+        )
+
+    def test_post_token_with_platform(self):
+        self.client.force_authenticate(self.user)
+        resp = self.client.post(
+            reverse("device-token"),
+            {"token": "fcm-token-123", "platform": "ios"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.fcm_token, "fcm-token-123")
+        self.assertEqual(self.user.fcm_platform, "ios")
+
+    def test_post_empty_token_returns_400(self):
+        self.client.force_authenticate(self.user)
+        resp = self.client.post(
+            reverse("device-token"),
+            {"token": ""},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_post_token_truncates_long_value(self):
+        self.client.force_authenticate(self.user)
+        long_token = "x" * 1000
+        resp = self.client.post(
+            reverse("device-token"),
+            {"token": long_token, "platform": "android"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(len(self.user.fcm_token), 512)
