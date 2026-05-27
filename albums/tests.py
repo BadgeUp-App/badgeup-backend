@@ -532,6 +532,618 @@ class VisionCircuitEdgeTests(APITestCase):
         self.assertAlmostEqual(float(row.total_usd), 0.5, places=4)
 
 
+class AlbumCRUDTests(APITestCase):
+    def setUp(self):
+        self.regular = User.objects.create_user(
+            username="reg2", email="reg2@a.com", password="S3curePass!2026"
+        )
+        self.admin = User.objects.create_user(
+            username="adm3", email="adm3@a.com", password="S3curePass!2026", is_staff=True
+        )
+
+    def _auth(self, user):
+        login = self.client.post(
+            reverse("auth-login"),
+            {"username": user.username, "password": "S3curePass!2026"},
+            format="json",
+        )
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        return client
+
+    def _create_album(self, title="Album X", theme="test"):
+        from albums.models import Album
+
+        return Album.objects.create(title=title, theme=theme, description="desc")
+
+    def test_album_list_includes_stickers_count(self):
+        from albums.models import Sticker
+
+        album = self._create_album()
+        Sticker.objects.create(album=album, name="s1")
+        Sticker.objects.create(album=album, name="s2")
+        client = self._auth(self.regular)
+        resp = client.get(reverse("album-list-create"))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(len(resp.data["results"]) >= 1)
+
+    def test_album_detail_get(self):
+        album = self._create_album(title="DetailTest")
+        client = self._auth(self.regular)
+        resp = client.get(reverse("album-detail", args=[album.id]))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["title"], "DetailTest")
+
+    def test_album_detail_admin_can_patch(self):
+        album = self._create_album(title="OldTitle")
+        client = self._auth(self.admin)
+        resp = client.patch(
+            reverse("album-detail", args=[album.id]),
+            {"title": "NewTitle"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        album.refresh_from_db()
+        self.assertEqual(album.title, "NewTitle")
+
+    def test_album_detail_regular_cannot_patch(self):
+        album = self._create_album()
+        client = self._auth(self.regular)
+        resp = client.patch(
+            reverse("album-detail", args=[album.id]),
+            {"title": "Hack"},
+            format="json",
+        )
+        self.assertIn(resp.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
+
+
+class StickerCRUDTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album
+
+        self.regular = User.objects.create_user(
+            username="r4", email="r4@a.com", password="S3curePass!2026"
+        )
+        self.admin = User.objects.create_user(
+            username="a4", email="a4@a.com", password="S3curePass!2026", is_staff=True
+        )
+        self.album = Album.objects.create(title="A1", theme="t", description="d")
+
+    def _auth(self, user):
+        login = self.client.post(
+            reverse("auth-login"),
+            {"username": user.username, "password": "S3curePass!2026"},
+            format="json",
+        )
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        return client
+
+    def test_list_stickers_filtered_by_album(self):
+        from albums.models import Album, Sticker
+
+        other = Album.objects.create(title="A2", theme="t")
+        Sticker.objects.create(album=self.album, name="mine")
+        Sticker.objects.create(album=other, name="other")
+        client = self._auth(self.regular)
+        resp = client.get(reverse("sticker-list-create") + f"?album={self.album.id}")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        names = [s["name"] for s in resp.data["results"]]
+        self.assertIn("mine", names)
+        self.assertNotIn("other", names)
+
+    def test_sticker_detail_get(self):
+        from albums.models import Sticker
+
+        sticker = Sticker.objects.create(album=self.album, name="solo")
+        client = self._auth(self.regular)
+        resp = client.get(reverse("sticker-detail", args=[sticker.id]))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["name"], "solo")
+
+    def test_sticker_admin_can_patch(self):
+        from albums.models import Sticker
+
+        sticker = Sticker.objects.create(album=self.album, name="old")
+        client = self._auth(self.admin)
+        resp = client.patch(
+            reverse("sticker-detail", args=[sticker.id]),
+            {"name": "renamed"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        sticker.refresh_from_db()
+        self.assertEqual(sticker.name, "renamed")
+
+    def test_sticker_regular_cannot_create(self):
+        client = self._auth(self.regular)
+        resp = client.post(
+            reverse("sticker-list-create"),
+            {"album": self.album.id, "name": "hack"},
+            format="multipart",
+        )
+        self.assertIn(resp.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
+
+    def test_sticker_admin_can_create_triggers_notification(self):
+        from unittest.mock import patch
+        from albums.models import Sticker
+
+        client = self._auth(self.admin)
+        with patch("albums.views.send_notification") as mocked:
+            resp = client.post(
+                reverse("sticker-list-create"),
+                {
+                    "album": self.album.id,
+                    "name": "new-sticker",
+                    "rarity": "common",
+                    "description": "x",
+                },
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(Sticker.objects.filter(name="new-sticker").exists())
+        mocked.assert_called_once()
+
+    def test_sticker_admin_create_swallows_notification_failure(self):
+        from unittest.mock import patch
+        from albums.models import Sticker
+
+        client = self._auth(self.admin)
+        with patch("albums.views.send_notification", side_effect=RuntimeError("no channels")):
+            resp = client.post(
+                reverse("sticker-list-create"),
+                {
+                    "album": self.album.id,
+                    "name": "robust-sticker",
+                    "rarity": "common",
+                    "description": "x",
+                },
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+
+class StickerMessageTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, Sticker
+
+        self.user = User.objects.create_user(
+            username="msguser", email="msg@a.com", password="S3curePass!2026"
+        )
+        self.album = Album.objects.create(title="MsgA", theme="t", description="d")
+        self.sticker = Sticker.objects.create(album=self.album, name="msgsticker")
+
+    def _auth(self):
+        login = self.client.post(
+            reverse("auth-login"),
+            {"username": self.user.username, "password": "S3curePass!2026"},
+            format="json",
+        )
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        return client
+
+    def test_post_message_creates_or_updates_user_sticker(self):
+        from achievements.models import UserSticker
+
+        client = self._auth()
+        resp = client.post(
+            reverse("sticker-message", args=[self.sticker.id]),
+            {"message": "esto es mio"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        us = UserSticker.objects.get(user=self.user, sticker=self.sticker)
+        self.assertEqual(us.user_message, "esto es mio")
+
+    def test_message_strips_whitespace(self):
+        from achievements.models import UserSticker
+
+        client = self._auth()
+        client.post(
+            reverse("sticker-message", args=[self.sticker.id]),
+            {"message": "   trimmed   "},
+            format="json",
+        )
+        us = UserSticker.objects.get(user=self.user, sticker=self.sticker)
+        self.assertEqual(us.user_message, "trimmed")
+
+    def test_message_endpoint_requires_auth(self):
+        resp = self.client.post(
+            reverse("sticker-message", args=[self.sticker.id]),
+            {"message": "x"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_message_returns_404_for_missing_sticker(self):
+        client = self._auth()
+        resp = client.post(
+            reverse("sticker-message", args=[99999]),
+            {"message": "x"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class ScanLogListTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, ScanLog
+
+        self.user_a = User.objects.create_user(
+            username="loga", email="loga@a.com", password="S3curePass!2026"
+        )
+        self.user_b = User.objects.create_user(
+            username="logb", email="logb@a.com", password="S3curePass!2026"
+        )
+        self.admin = User.objects.create_user(
+            username="logadm", email="logadm@a.com", password="S3curePass!2026", is_staff=True
+        )
+        ScanLog.objects.create(user=self.user_a, detected_items="x1", matched=True)
+        ScanLog.objects.create(user=self.user_a, detected_items="x2", matched=False)
+        ScanLog.objects.create(user=self.user_b, detected_items="y1", matched=True)
+
+    def _auth(self, user):
+        login = self.client.post(
+            reverse("auth-login"),
+            {"username": user.username, "password": "S3curePass!2026"},
+            format="json",
+        )
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        return client
+
+    def test_regular_user_sees_only_own_logs(self):
+        client = self._auth(self.user_a)
+        resp = client.get(reverse("scan-log-list"))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        items = resp.data.get("results", resp.data)
+        for entry in items:
+            self.assertEqual(entry["username"], self.user_a.username)
+
+    def test_admin_sees_all_logs(self):
+        client = self._auth(self.admin)
+        resp = client.get(reverse("scan-log-list"))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        items = resp.data.get("results", resp.data)
+        usernames = {entry["username"] for entry in items}
+        self.assertIn(self.user_a.username, usernames)
+        self.assertIn(self.user_b.username, usernames)
+
+    def test_filter_matched_true(self):
+        client = self._auth(self.user_a)
+        resp = client.get(reverse("scan-log-list") + "?matched=true")
+        items = resp.data.get("results", resp.data)
+        self.assertTrue(all(entry["matched"] for entry in items))
+
+    def test_filter_matched_false(self):
+        client = self._auth(self.user_a)
+        resp = client.get(reverse("scan-log-list") + "?matched=false")
+        items = resp.data.get("results", resp.data)
+        self.assertTrue(all(not entry["matched"] for entry in items))
+
+    def test_scan_log_requires_auth(self):
+        resp = self.client.get(reverse("scan-log-list"))
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class StickerReferenceUploadTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, Sticker
+
+        self.admin = User.objects.create_user(
+            username="refadm", email="refadm@a.com", password="S3curePass!2026", is_staff=True
+        )
+        self.regular = User.objects.create_user(
+            username="reffer", email="reffer@a.com", password="S3curePass!2026"
+        )
+        self.album = Album.objects.create(title="RefA", theme="t", description="d")
+        self.sticker = Sticker.objects.create(album=self.album, name="needs-refs")
+
+    def _auth(self, user):
+        login = self.client.post(
+            reverse("auth-login"),
+            {"username": user.username, "password": "S3curePass!2026"},
+            format="json",
+        )
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        return client
+
+    def _fake_image(self, name="ref.jpg"):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        import io
+
+        img = Image.new("RGB", (10, 10), color=(50, 50, 50))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        return SimpleUploadedFile(name, buf.getvalue(), content_type="image/jpeg")
+
+    def test_upload_creates_reference_photos(self):
+        from albums.models import StickerReferencePhoto
+
+        client = self._auth(self.admin)
+        resp = client.post(
+            reverse("sticker-references", args=[self.sticker.id]),
+            {"photos": [self._fake_image("a.jpg"), self._fake_image("b.jpg")], "label": "lab1"},
+            format="multipart",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["uploaded"], 2)
+        self.assertEqual(StickerReferencePhoto.objects.filter(sticker=self.sticker).count(), 2)
+
+    def test_upload_no_photos_returns_400(self):
+        client = self._auth(self.admin)
+        resp = client.post(
+            reverse("sticker-references", args=[self.sticker.id]),
+            {"label": "x"},
+            format="multipart",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_upload_regular_user_forbidden(self):
+        client = self._auth(self.regular)
+        resp = client.post(
+            reverse("sticker-references", args=[self.sticker.id]),
+            {"photos": self._fake_image()},
+            format="multipart",
+        )
+        self.assertIn(resp.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
+
+
+class MatchAlbumPhotoTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, Sticker
+
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="matchu", email="matchu@a.com", password="S3curePass!2026"
+        )
+        self.album = Album.objects.create(title="Carros", theme="vehiculos", description="d")
+        self.sticker = Sticker.objects.create(album=self.album, name="ferrari")
+
+    def _auth(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        return client
+
+    def _photo(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        import io
+
+        img = Image.new("RGB", (50, 50), color=(100, 100, 100))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        return SimpleUploadedFile("car.jpg", buf.getvalue(), content_type="image/jpeg")
+
+    def test_disabled_returns_message(self):
+        from django.test import override_settings
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=False):
+            resp = client.post(
+                reverse("album-match-photo", args=[self.album.id]),
+                {"photo": self._photo()},
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["unlocked"])
+        self.assertIn("deshabilitada", resp.data["message"].lower())
+
+    def test_missing_photo_returns_400(self):
+        from django.test import override_settings
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="fake"):
+            resp = client.post(
+                reverse("album-match-photo", args=[self.album.id]),
+                {},
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_album_not_found(self):
+        from django.test import override_settings
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="fake"):
+            resp = client.post(
+                reverse("album-match-photo", args=[99999]),
+                {"photo": self._photo()},
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_analyzer_returns_none(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="fake"), \
+             patch("albums.views.analyze_car_photo", return_value=None):
+            resp = client.post(
+                reverse("album-match-photo", args=[self.album.id]),
+                {"photo": self._photo()},
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["unlocked"])
+
+    def test_analyzer_unrecognized(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="fake"), \
+             patch("albums.views.analyze_car_photo", return_value={"recognized": False, "fun_fact": "no car"}):
+            resp = client.post(
+                reverse("album-match-photo", args=[self.album.id]),
+                {"photo": self._photo()},
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["unlocked"])
+        self.assertEqual(resp.data["fun_fact"], "no car")
+
+    def test_analyzer_recognized_no_sticker_id(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="fake"), \
+             patch(
+                 "albums.views.analyze_car_photo",
+                 return_value={
+                     "recognized": True,
+                     "confidence": 0.9,
+                     "sticker_id": None,
+                     "make": "Tesla",
+                     "model": "Model 3",
+                 },
+             ):
+            resp = client.post(
+                reverse("album-match-photo", args=[self.album.id]),
+                {"photo": self._photo()},
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["unlocked"])
+        self.assertIn("Tesla", resp.data["message"])
+
+    def test_analyzer_sticker_not_in_album(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="fake"), \
+             patch(
+                 "albums.views.analyze_car_photo",
+                 return_value={
+                     "recognized": True,
+                     "confidence": 0.95,
+                     "sticker_id": 99999,
+                     "make": "Audi",
+                 },
+             ):
+            resp = client.post(
+                reverse("album-match-photo", args=[self.album.id]),
+                {"photo": self._photo()},
+                format="multipart",
+            )
+        self.assertFalse(resp.data["unlocked"])
+        self.assertIn("no pertenece", resp.data["message"].lower())
+
+    def test_analyzer_low_confidence(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="fake"), \
+             patch(
+                 "albums.views.analyze_car_photo",
+                 return_value={
+                     "recognized": True,
+                     "confidence": 0.3,
+                     "sticker_id": self.sticker.id,
+                     "make": "Ferrari",
+                 },
+             ):
+            resp = client.post(
+                reverse("album-match-photo", args=[self.album.id]),
+                {"photo": self._photo()},
+                format="multipart",
+            )
+        self.assertFalse(resp.data["unlocked"])
+        self.assertIn("segura", resp.data["message"].lower())
+
+    def test_full_unlock_success(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+        from achievements.models import UserSticker
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="fake"), \
+             patch(
+                 "albums.views.analyze_car_photo",
+                 return_value={
+                     "recognized": True,
+                     "confidence": 0.95,
+                     "sticker_id": self.sticker.id,
+                     "make": "Ferrari",
+                     "model": "F40",
+                     "fun_fact": "icon",
+                     "reason": "ok",
+                 },
+             ), patch("albums.views.send_notification"):
+            resp = client.post(
+                reverse("album-match-photo", args=[self.album.id]),
+                {"photo": self._photo(), "lat": "20.5", "lng": "-103.5"},
+                format="multipart",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["unlocked"])
+        us = UserSticker.objects.get(user=self.user, sticker=self.sticker)
+        self.assertTrue(us.validated)
+        self.assertEqual(us.location_lat, 20.5)
+        self.assertEqual(us.location_lng, -103.5)
+
+    def test_already_unlocked_adds_photo(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+        from achievements.models import UserSticker, CapturePhoto
+
+        UserSticker.objects.create(
+            user=self.user, sticker=self.sticker, validated=True,
+            status=UserSticker.STATUS_APPROVED,
+        )
+
+        client = self._auth()
+        before = CapturePhoto.objects.filter(user_sticker__user=self.user).count()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="fake"), \
+             patch(
+                 "albums.views.analyze_car_photo",
+                 return_value={
+                     "recognized": True,
+                     "confidence": 0.95,
+                     "sticker_id": self.sticker.id,
+                     "make": "Ferrari",
+                 },
+             ):
+            resp = client.post(
+                reverse("album-match-photo", args=[self.album.id]),
+                {"photo": self._photo()},
+                format="multipart",
+            )
+        self.assertTrue(resp.data["unlocked"])
+        self.assertTrue(resp.data["already_unlocked"])
+        after = CapturePhoto.objects.filter(user_sticker__user=self.user).count()
+        self.assertEqual(after, before + 1)
+
+    def test_invalid_lat_lng_swallowed(self):
+        from django.test import override_settings
+        from unittest.mock import patch
+
+        client = self._auth()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="fake"), \
+             patch(
+                 "albums.views.analyze_car_photo",
+                 return_value={
+                     "recognized": True,
+                     "confidence": 0.95,
+                     "sticker_id": self.sticker.id,
+                     "make": "Ferrari",
+                 },
+             ), patch("albums.views.send_notification"):
+            resp = client.post(
+                reverse("album-match-photo", args=[self.album.id]),
+                {"photo": self._photo(), "lat": "not-a-float", "lng": "also-bad"},
+                format="multipart",
+            )
+        self.assertTrue(resp.data["unlocked"])
+
+
 class VisionPrefilterTests(APITestCase):
     def test_disabled_returns_none(self):
         from django.test import override_settings
