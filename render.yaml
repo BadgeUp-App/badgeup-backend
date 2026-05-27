@@ -11,15 +11,15 @@ services:
       - key: DJANGO_DEBUG
         value: "False"
       - key: DJANGO_ALLOWED_HOSTS
-        value: ".onrender.com,badgeup-backend.onrender.com"
+        value: ".onrender.com,badgeup-backend.onrender.com,badgeup.aroagroup.com"
       - key: DJANGO_CSRF_TRUSTED_ORIGINS
-        value: "https://badgeup-backend.onrender.com"
+        value: "https://badgeup-backend.onrender.com,https://badgeup.aroagroup.com"
       - key: DJANGO_TIME_ZONE
         value: UTC
       - key: DATABASE_FALLBACK
         value: "false"
       - key: CORS_ALLOWED_ORIGINS
-        value: "https://badgeup-backend.onrender.com"
+        value: "https://badgeup-backend.onrender.com,https://badgeup.aroagroup.com"
       - key: ACCESS_TOKEN_LIFETIME_MINUTES
         value: "60"
       - key: REFRESH_TOKEN_LIFETIME_DAYS
