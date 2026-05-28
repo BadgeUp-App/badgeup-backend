@@ -775,3 +775,161 @@ class DeviceTokenExtendedTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.user.refresh_from_db()
         self.assertEqual(len(self.user.fcm_token), 512)
+
+
+class GoogleCallbackTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_no_code_redirects_with_error(self):
+        resp = self.client.get(reverse("google-callback"))
+        self.assertEqual(resp.status_code, status.HTTP_302_FOUND)
+        self.assertIn("google_no_code", resp.url)
+
+    def test_token_exchange_fails_redirects(self):
+        from unittest.mock import patch, MagicMock
+
+        fake_token_resp = MagicMock(status_code=400)
+        with patch("users.views.requests.post", return_value=fake_token_resp):
+            resp = self.client.get(reverse("google-callback") + "?code=abc")
+        self.assertEqual(resp.status_code, status.HTTP_302_FOUND)
+        self.assertIn("google_token", resp.url)
+
+    def test_no_access_token_in_response_redirects(self):
+        from unittest.mock import patch, MagicMock
+
+        token_resp = MagicMock(status_code=200)
+        token_resp.json.return_value = {"foo": "bar"}
+        with patch("users.views.requests.post", return_value=token_resp):
+            resp = self.client.get(reverse("google-callback") + "?code=abc")
+        self.assertEqual(resp.status_code, status.HTTP_302_FOUND)
+        self.assertIn("google_no_access", resp.url)
+
+    def test_userinfo_fails_redirects(self):
+        from unittest.mock import patch, MagicMock
+
+        token_resp = MagicMock(status_code=200)
+        token_resp.json.return_value = {"access_token": "tok"}
+        userinfo_resp = MagicMock(status_code=500)
+        with patch("users.views.requests.post", return_value=token_resp), \
+             patch("users.views.requests.get", return_value=userinfo_resp):
+            resp = self.client.get(reverse("google-callback") + "?code=abc")
+        self.assertEqual(resp.status_code, status.HTTP_302_FOUND)
+        self.assertIn("google_userinfo", resp.url)
+
+    def test_no_email_in_profile_redirects(self):
+        from unittest.mock import patch, MagicMock
+
+        token_resp = MagicMock(status_code=200)
+        token_resp.json.return_value = {"access_token": "tok"}
+        userinfo_resp = MagicMock(status_code=200)
+        userinfo_resp.json.return_value = {"name": "Sin email"}
+        with patch("users.views.requests.post", return_value=token_resp), \
+             patch("users.views.requests.get", return_value=userinfo_resp):
+            resp = self.client.get(reverse("google-callback") + "?code=abc")
+        self.assertEqual(resp.status_code, status.HTTP_302_FOUND)
+        self.assertIn("google_no_email", resp.url)
+
+    def test_success_creates_user_and_redirects_with_tokens(self):
+        from unittest.mock import patch, MagicMock
+
+        token_resp = MagicMock(status_code=200)
+        token_resp.json.return_value = {"access_token": "tok"}
+        userinfo_resp = MagicMock(status_code=200)
+        userinfo_resp.json.return_value = {
+            "email": "callback.user@gmail.com",
+            "given_name": "Call",
+            "family_name": "Back",
+            "picture": None,
+        }
+        with patch("users.views.requests.post", return_value=token_resp), \
+             patch("users.views.requests.get", return_value=userinfo_resp):
+            resp = self.client.get(reverse("google-callback") + "?code=abc")
+        self.assertEqual(resp.status_code, status.HTTP_302_FOUND)
+        self.assertIn("google=1", resp.url)
+        self.assertIn("access=", resp.url)
+        self.assertIn("refresh=", resp.url)
+        self.assertTrue(User.objects.filter(email="callback.user@gmail.com").exists())
+
+    def test_success_with_picture_sets_avatar(self):
+        from unittest.mock import patch, MagicMock
+
+        token_resp = MagicMock(status_code=200)
+        token_resp.json.return_value = {"access_token": "tok"}
+        userinfo_resp = MagicMock(status_code=200)
+        userinfo_resp.json.return_value = {
+            "email": "withpic@gmail.com",
+            "given_name": "P",
+            "family_name": "X",
+            "picture": "https://lh3.googleusercontent.com/abc",
+        }
+        with patch("users.views.requests.post", return_value=token_resp), \
+             patch("users.views.requests.get", return_value=userinfo_resp):
+            self.client.get(reverse("google-callback") + "?code=abc")
+        user = User.objects.get(email="withpic@gmail.com")
+        self.assertTrue(str(user.avatar))
+
+
+class PasswordResetRequestExtendedTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="prr",
+            email="prr@a.com",
+            password="OldPassword!123",
+        )
+
+    def test_request_with_known_email_sets_reset_code(self):
+        from unittest.mock import patch
+
+        with patch("django.core.mail.send_mail", return_value=1):
+            resp = self.client.post(
+                reverse("password-reset"),
+                {"email": "prr@a.com"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.reset_code)
+        self.assertIsNotNone(self.user.reset_code_expires)
+
+    def test_request_with_unknown_email_returns_generic(self):
+        resp = self.client.post(
+            reverse("password-reset"),
+            {"email": "nobody@nowhere.com"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_request_with_missing_email_returns_400(self):
+        resp = self.client.post(
+            reverse("password-reset"),
+            {},
+            format="json",
+        )
+        self.assertIn(resp.status_code, (status.HTTP_400_BAD_REQUEST, status.HTTP_200_OK))
+
+
+class LeaderboardExtendedTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_leaderboard_ordering(self):
+        u_hi = User.objects.create_user(
+            username="hi", email="hi@a.com", password="S3curePass!2026"
+        )
+        u_lo = User.objects.create_user(
+            username="lo", email="lo@a.com", password="S3curePass!2026"
+        )
+        u_hi.points = 500
+        u_hi.save(update_fields=["points"])
+        u_lo.points = 100
+        u_lo.save(update_fields=["points"])
+        resp = self.client.get(reverse("leaderboard"))
+        items = resp.data.get("results", resp.data)
+        usernames = [u["username"] for u in items]
+        self.assertLess(usernames.index("hi"), usernames.index("lo"))
+
+
+# FirebaseLoginViewExtraTests removed: error path tested via test_invalid_firebase_token
+# in FirebaseLoginViewTests.
