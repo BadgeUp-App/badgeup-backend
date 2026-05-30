@@ -1513,6 +1513,326 @@ class GlobalScanTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
 
 
+class AlbumsChatRoomTests(APITestCase):
+    def test_chat_room_name_order_independent(self):
+        from albums.consumers import chat_room_name
+
+        self.assertEqual(chat_room_name(1, 2), chat_room_name(2, 1))
+        self.assertEqual(chat_room_name(3, 3), "chat_3_3")
+
+    def test_chat_room_name_format(self):
+        from albums.consumers import chat_room_name
+
+        self.assertEqual(chat_room_name(7, 4), "chat_4_7")
+
+
+class AlbumsAuthenticateJWTTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="jw", email="jw@a.com", password="S3curePass!2026"
+        )
+
+    def _token(self):
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        return str(RefreshToken.for_user(self.user).access_token)
+
+    def test_authenticate_jwt_valid_returns_user(self):
+        import asyncio
+        from unittest.mock import patch
+        from albums.consumers import authenticate_jwt
+
+        token = self._token()
+
+        def fake_wrap(sync_callable):
+            async def call(*args, **kwargs):
+                return self.user
+
+            return call
+
+        with patch("albums.consumers.sync_to_async", side_effect=fake_wrap):
+            result = asyncio.run(authenticate_jwt(token))
+        self.assertEqual(result.id, self.user.id)
+
+    def test_authenticate_jwt_invalid_returns_none(self):
+        import asyncio
+        from albums.consumers import authenticate_jwt
+
+        result = asyncio.run(authenticate_jwt("garbage"))
+        self.assertIsNone(result)
+
+
+class AlbumsChatConsumerTests(APITestCase):
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="acca", email="acca@a.com", password="S3curePass!2026"
+        )
+        self.bob = User.objects.create_user(
+            username="accb", email="accb@a.com", password="S3curePass!2026"
+        )
+
+    def test_connect_without_token_closes(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from albums.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.scope = {"query_string": b"", "url_route": {"kwargs": {"room_id": "1"}}}
+            c.channel_name = "x"
+            c.channel_layer = AsyncMock()
+            c.accept = AsyncMock()
+            c.close = AsyncMock()
+            await c.connect()
+            c.close.assert_called_once()
+            c.accept.assert_not_called()
+
+        asyncio.run(runner())
+
+    def test_connect_with_invalid_token_closes(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from albums.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.scope = {
+                "query_string": b"token=badtoken",
+                "url_route": {"kwargs": {"room_id": "1"}},
+            }
+            c.channel_name = "x"
+            c.channel_layer = AsyncMock()
+            c.accept = AsyncMock()
+            c.close = AsyncMock()
+            await c.connect()
+            c.close.assert_called_once()
+            c.accept.assert_not_called()
+
+        asyncio.run(runner())
+
+    def test_connect_without_room_id_closes(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        from albums.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.scope = {
+                "query_string": b"token=x",
+                "url_route": {"kwargs": {}},
+            }
+            c.channel_name = "x"
+            c.channel_layer = AsyncMock()
+            c.accept = AsyncMock()
+            c.close = AsyncMock()
+
+            async def fake_authenticate(_t):
+                return self.alice
+
+            with patch("albums.consumers.authenticate_jwt", fake_authenticate):
+                await c.connect()
+            c.close.assert_called_once()
+            c.accept.assert_not_called()
+
+        asyncio.run(runner())
+
+    def test_connect_authorized_friend_accepts(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        from albums.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.scope = {
+                "query_string": b"token=x",
+                "url_route": {"kwargs": {"room_id": str(self.bob.id)}},
+            }
+            c.channel_name = "x"
+            c.channel_layer = AsyncMock()
+            c.accept = AsyncMock()
+            c.close = AsyncMock()
+
+            async def fake_authenticate(_t):
+                return self.alice
+
+            async def fake_is_friend(*args, **kwargs):
+                return True
+
+            c._is_friend = fake_is_friend
+            with patch("albums.consumers.authenticate_jwt", fake_authenticate):
+                await c.connect()
+            c.accept.assert_called_once()
+            c.close.assert_not_called()
+
+        asyncio.run(runner())
+
+    def test_disconnect_discards(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from albums.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.channel_name = "x"
+            c.room_group_name = "chat_1_2"
+            c.channel_layer = AsyncMock()
+            await c.disconnect(1000)
+            c.channel_layer.group_discard.assert_called_once()
+
+        asyncio.run(runner())
+
+    def test_receive_empty_text_skipped(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from albums.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.scope = {
+                "user": self.alice,
+                "url_route": {"kwargs": {"room_id": str(self.bob.id)}},
+            }
+            c.channel_name = "x"
+            c.channel_layer = AsyncMock()
+            await c.receive_json({"text": "   "})
+            c.channel_layer.group_send.assert_not_called()
+
+        asyncio.run(runner())
+
+    def test_receive_broadcasts_message(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from albums.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.scope = {
+                "user": self.alice,
+                "url_route": {"kwargs": {"room_id": str(self.bob.id)}},
+            }
+            c.channel_name = "x"
+            c.room_group_name = "chat_a_b"
+            c.channel_layer = AsyncMock()
+
+            async def fake_create(sender_id, recipient_id, text):
+                return {"id": 1, "text": text}
+
+            c._create_message = fake_create
+            await c.receive_json({"text": "hola"})
+            self.assertEqual(c.channel_layer.group_send.call_count, 2)
+
+        asyncio.run(runner())
+
+    def test_chat_message_handler(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from albums.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.send_json = AsyncMock()
+            await c.chat_message({"message": {"x": 1}})
+            c.send_json.assert_called_once_with(
+                {"type": "chat_message", "message": {"x": 1}}
+            )
+
+        asyncio.run(runner())
+
+
+class AlbumsNotificationConsumerTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="nuc", email="nuc@a.com", password="S3curePass!2026"
+        )
+
+    def test_connect_without_token_closes(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from albums.consumers import NotificationConsumer
+
+        async def runner():
+            c = NotificationConsumer()
+            c.scope = {"query_string": b""}
+            c.channel_name = "x"
+            c.channel_layer = AsyncMock()
+            c.accept = AsyncMock()
+            c.close = AsyncMock()
+            await c.connect()
+            c.close.assert_called_once()
+
+        asyncio.run(runner())
+
+    def test_connect_invalid_token_closes(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from albums.consumers import NotificationConsumer
+
+        async def runner():
+            c = NotificationConsumer()
+            c.scope = {"query_string": b"token=bad"}
+            c.channel_name = "x"
+            c.channel_layer = AsyncMock()
+            c.accept = AsyncMock()
+            c.close = AsyncMock()
+            await c.connect()
+            c.close.assert_called_once()
+
+        asyncio.run(runner())
+
+    def test_connect_valid_token_accepts(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        from albums.consumers import NotificationConsumer
+
+        async def runner():
+            c = NotificationConsumer()
+            c.scope = {"query_string": b"token=x"}
+            c.channel_name = "x"
+            c.channel_layer = AsyncMock()
+            c.accept = AsyncMock()
+            c.close = AsyncMock()
+
+            async def fake_authenticate(_t):
+                return self.user
+
+            with patch("albums.consumers.authenticate_jwt", fake_authenticate):
+                await c.connect()
+            c.accept.assert_called_once()
+            c.close.assert_not_called()
+
+        asyncio.run(runner())
+
+    def test_disconnect_discards_groups(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from albums.consumers import NotificationConsumer
+
+        async def runner():
+            c = NotificationConsumer()
+            c.channel_name = "x"
+            c.group_name = "user_42"
+            c.channel_layer = AsyncMock()
+            await c.disconnect(1000)
+            self.assertEqual(c.channel_layer.group_discard.call_count, 2)
+
+        asyncio.run(runner())
+
+    def test_notification_handler(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from albums.consumers import NotificationConsumer
+
+        async def runner():
+            c = NotificationConsumer()
+            c.send_json = AsyncMock()
+            await c.notification({"payload": {"a": "b"}})
+            c.send_json.assert_called_once_with({"type": "notification", "a": "b"})
+
+        asyncio.run(runner())
+
+
 class VisionPrefilterTests(APITestCase):
     def test_disabled_returns_none(self):
         from django.test import override_settings
