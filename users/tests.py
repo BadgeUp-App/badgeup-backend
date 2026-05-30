@@ -1111,6 +1111,103 @@ class FirebaseLoginExtendedTests(APITestCase):
         user = User.objects.get(email="fbcollide@test.com")
         self.assertNotEqual(user.username, "fbcollide")
 
+    def test_firebase_with_picture_sets_avatar(self):
+        from unittest.mock import patch
+
+        with patch(
+            "users.views.firebase_verify_id_token",
+            return_value=(
+                {
+                    "email": "fbpic@test.com",
+                    "name": "Pic User",
+                    "picture": "https://cdn.example.com/avatar.jpg",
+                },
+                None,
+            ),
+        ):
+            resp = self.client.post(
+                reverse("firebase-login"),
+                {"id_token": "x"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        user = User.objects.get(email="fbpic@test.com")
+        self.assertTrue(user.avatar)
+
+
+class GoogleMobilePictureTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_picture_sets_avatar_on_new_user(self):
+        from unittest.mock import patch, MagicMock
+
+        fake_resp = MagicMock(status_code=200)
+        fake_resp.json.return_value = {
+            "email": "gmpic@test.com",
+            "given_name": "GM",
+            "family_name": "Pic",
+            "picture": "https://cdn.example.com/gm.jpg",
+        }
+        with patch("users.views.requests.get", return_value=fake_resp):
+            resp = self.client.post(
+                reverse("google-mobile"),
+                {"access_token": "valid"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        user = User.objects.get(email="gmpic@test.com")
+        self.assertTrue(user.avatar)
+
+
+class ChangePasswordMissingFieldsTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="cpm", email="cpm@a.com", password="OldPass!123"
+        )
+
+    def test_missing_old_password_returns_400(self):
+        self.client.force_authenticate(self.user)
+        resp = self.client.post(
+            reverse("change-password"),
+            {"new_password": "NewPass!456"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_missing_new_password_returns_400(self):
+        self.client.force_authenticate(self.user)
+        resp = self.client.post(
+            reverse("change-password"),
+            {"old_password": "OldPass!123"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class PasswordResetSendMailTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="prsm", email="prsm@a.com", password="initial!123"
+        )
+
+    def test_send_mail_exception_still_returns_generic(self):
+        from unittest.mock import patch
+
+        with patch(
+            "django.core.mail.send_mail", side_effect=RuntimeError("smtp down")
+        ):
+            resp = self.client.post(
+                reverse("password-reset"),
+                {"email": "prsm@a.com"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.reset_code)
+
 
 class GoogleCallbackTests(APITestCase):
     def setUp(self):
