@@ -512,6 +512,199 @@ class UserStickerHistoryTests(APITestCase):
 
 
 class AnalyzeCarPhotoTests(APITestCase):
+    def _fake_image_bytes(self):
+        from PIL import Image
+        import io
+
+        img = Image.new("RGB", (100, 100), color=(100, 100, 100))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        buf.seek(0)
+        return buf
+
+    def test_disabled_returns_error(self):
+        from django.test import override_settings
+        from achievements.services import analyze_car_photo
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=False):
+            result = analyze_car_photo(self._fake_image_bytes(), [])
+        self.assertIn("error", result)
+
+    def test_successful_response_parsed(self):
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_car_photo
+        from django.test import override_settings
+        import json
+
+        msg = MagicMock()
+        msg.message.content = json.dumps({
+            "recognized": True,
+            "make": "Ferrari",
+            "model": "F40",
+            "confidence": 0.95,
+            "sticker_id": 1,
+            "reason": "obvious",
+            "fun_fact": "italian",
+        })
+        completion = MagicMock(choices=[msg])
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.return_value = completion
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True), \
+             patch("achievements.services.get_openai_client", return_value=fake_client):
+            result = analyze_car_photo(self._fake_image_bytes(), [])
+        self.assertTrue(result["recognized"])
+        self.assertEqual(result["make"], "Ferrari")
+        self.assertEqual(result["sticker_id"], 1)
+
+    def test_openai_exception_returns_none(self):
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_car_photo
+        from django.test import override_settings
+
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.side_effect = RuntimeError("boom")
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True), \
+             patch("achievements.services.get_openai_client", return_value=fake_client):
+            result = analyze_car_photo(self._fake_image_bytes(), [])
+        self.assertIsNone(result)
+
+    def test_response_fills_missing_keys(self):
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_car_photo
+        from django.test import override_settings
+        import json
+
+        msg = MagicMock()
+        msg.message.content = json.dumps({"recognized": True})
+        completion = MagicMock(choices=[msg])
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.return_value = completion
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True), \
+             patch("achievements.services.get_openai_client", return_value=fake_client):
+            result = analyze_car_photo(self._fake_image_bytes(), [])
+        self.assertIn("make", result)
+        self.assertIn("model", result)
+        self.assertIn("confidence", result)
+        self.assertIn("sticker_id", result)
+
+
+class AnalyzeUserStickerTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, Sticker
+        from achievements.models import UserSticker
+
+        self.user = _make_user(username="auser", email="auser@test.com")
+        self.album = Album.objects.create(title="A", theme="t", description="d")
+        self.sticker = Sticker.objects.create(album=self.album, name="ferr")
+        self.user_sticker = UserSticker.objects.create(
+            user=self.user, sticker=self.sticker, photo_url="https://example.com/p.jpg"
+        )
+
+    def test_disabled_returns_auto_approve(self):
+        from django.test import override_settings
+        from achievements.services import analyze_user_sticker
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=False):
+            result = analyze_user_sticker(self.user_sticker)
+        self.assertTrue(result["approved"])
+        self.assertIn("disabled", result["reason"].lower())
+
+    def test_no_image_returns_rejected(self):
+        from django.test import override_settings
+        from achievements.models import UserSticker
+        from achievements.services import analyze_user_sticker
+
+        us = UserSticker.objects.create(
+            user=self.user, sticker=self.sticker, photo_url=""
+        )
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True):
+            result = analyze_user_sticker(us)
+        self.assertFalse(result["approved"])
+
+    def test_match_returns_approved(self):
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_user_sticker
+        from django.test import override_settings
+        import json
+
+        fake_response = MagicMock()
+        fake_response.output_text = json.dumps({
+            "match_score": 0.9,
+            "is_match": True,
+            "reason": "matches well",
+        })
+        fake_response.id = "resp_abc123"
+        fake_client = MagicMock()
+        fake_client.responses.create.return_value = fake_response
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True), \
+             patch("achievements.services.get_openai_client", return_value=fake_client):
+            result = analyze_user_sticker(self.user_sticker)
+        self.assertTrue(result["approved"])
+        self.assertTrue(result["is_match"])
+        self.assertEqual(result["match_score"], 0.9)
+        self.assertEqual(result["request_id"], "resp_abc123")
+
+    def test_low_score_returns_not_approved(self):
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_user_sticker
+        from django.test import override_settings
+        import json
+
+        fake_response = MagicMock()
+        fake_response.output_text = json.dumps({
+            "match_score": 0.3,
+            "is_match": True,
+            "reason": "weak match",
+        })
+        fake_client = MagicMock()
+        fake_client.responses.create.return_value = fake_response
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True), \
+             patch("achievements.services.get_openai_client", return_value=fake_client):
+            result = analyze_user_sticker(self.user_sticker)
+        self.assertFalse(result["approved"])
+
+    def test_no_match_returns_not_approved(self):
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_user_sticker
+        from django.test import override_settings
+        import json
+
+        fake_response = MagicMock()
+        fake_response.output_text = json.dumps({
+            "match_score": 0.95,
+            "is_match": False,
+            "reason": "different car",
+        })
+        fake_client = MagicMock()
+        fake_client.responses.create.return_value = fake_response
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True), \
+             patch("achievements.services.get_openai_client", return_value=fake_client):
+            result = analyze_user_sticker(self.user_sticker)
+        self.assertFalse(result["approved"])
+
+    def test_malformed_json_returns_error(self):
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_user_sticker
+        from django.test import override_settings
+
+        fake_response = MagicMock()
+        fake_response.output_text = "not valid json"
+        fake_client = MagicMock()
+        fake_client.responses.create.return_value = fake_response
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True), \
+             patch("achievements.services.get_openai_client", return_value=fake_client):
+            result = analyze_user_sticker(self.user_sticker)
+        self.assertFalse(result["approved"])
+        self.assertIn("error", result)
+
+
+class AnalyzeCarPhotoTests(APITestCase):
     def _photo(self):
         from PIL import Image
         import io
