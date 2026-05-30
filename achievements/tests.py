@@ -450,7 +450,7 @@ class FriendRequestFlowTests(APITestCase):
         self.assertEqual(len(items), 1)
 
 
-class ChatInboxTests(APITestCase):
+class ChatInboxFlowTests(APITestCase):
     def setUp(self):
         self.alice = _make_user(username="al2", email="al2@test.com")
         self.bob = _make_user(username="bo2", email="bo2@test.com")
@@ -511,7 +511,7 @@ class UserStickerHistoryTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
 
 
-class AnalyzeCarPhotoTests(APITestCase):
+class AnalyzeCarPhotoSimpleTests(APITestCase):
     def _fake_image_bytes(self):
         from PIL import Image
         import io
@@ -590,7 +590,7 @@ class AnalyzeCarPhotoTests(APITestCase):
         self.assertIn("sticker_id", result)
 
 
-class AnalyzeUserStickerTests(APITestCase):
+class AnalyzeUserStickerSimpleTests(APITestCase):
     def setUp(self):
         from albums.models import Album, Sticker
         from achievements.models import UserSticker
@@ -613,11 +613,13 @@ class AnalyzeUserStickerTests(APITestCase):
 
     def test_no_image_returns_rejected(self):
         from django.test import override_settings
+        from albums.models import Sticker
         from achievements.models import UserSticker
         from achievements.services import analyze_user_sticker
 
+        sticker2 = Sticker.objects.create(album=self.album, name="other-noimg")
         us = UserSticker.objects.create(
-            user=self.user, sticker=self.sticker, photo_url=""
+            user=self.user, sticker=sticker2, photo_url=""
         )
         with override_settings(USE_OPENAI_STICKER_VALIDATION=True):
             result = analyze_user_sticker(us)
@@ -704,7 +706,7 @@ class AnalyzeUserStickerTests(APITestCase):
         self.assertIn("error", result)
 
 
-class ValidateUserStickerTaskTests(APITestCase):
+class ValidateUserStickerTaskSimpleTests(APITestCase):
     def setUp(self):
         from albums.models import Album, Sticker
         from achievements.models import UserSticker
