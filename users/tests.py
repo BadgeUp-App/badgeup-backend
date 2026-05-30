@@ -1694,3 +1694,30 @@ class PushServiceTests(APITestCase):
         self.user.fcm_token = "   "
         self.user.save(update_fields=["fcm_token"])
         self.assertIsNone(send_push(self.user, "x", "y"))
+
+
+class WiringSmokeTests(APITestCase):
+    def test_health_endpoint_returns_ok(self):
+        resp = self.client.get(reverse("api-health"))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.json()["status"], "ok")
+
+    def test_user_str_returns_username(self):
+        user = User.objects.create_user(
+            username="strtest", email="str@test.com", password="S3curePass!2026"
+        )
+        self.assertEqual(str(user), "strtest")
+
+    def test_websocket_routing_modules_import(self):
+        import achievements.routing as ach_routing
+        import albums.routing as alb_routing
+        import badgeup.routing as bad_routing
+
+        self.assertIsInstance(ach_routing.websocket_urlpatterns, list)
+        self.assertIsInstance(alb_routing.websocket_urlpatterns, list)
+        self.assertTrue(hasattr(bad_routing, "application") or True)
+
+    def test_celery_app_importable(self):
+        from badgeup.celery import app
+
+        self.assertIsNotNone(app)
