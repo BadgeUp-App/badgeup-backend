@@ -1922,3 +1922,38 @@ class VisionPrefilterTests(APITestCase):
         with patch("albums.vision_prefilter.get_openai_client", return_value=fake_client):
             result = is_collectible(b"bytes")
             self.assertEqual(result, {})
+
+
+class SeedCarrosDeFerCommandTests(APITestCase):
+    def test_creates_album_and_stickers(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from albums.models import Album, Sticker
+
+        out = StringIO()
+        call_command("seed_carros_de_fer", stdout=out)
+        album = Album.objects.get(title="Carros de Fer")
+        self.assertGreater(Sticker.objects.filter(album=album).count(), 0)
+
+    def test_idempotent_second_run_skips(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from albums.models import Album, Sticker
+
+        call_command("seed_carros_de_fer", stdout=StringIO())
+        album = Album.objects.get(title="Carros de Fer")
+        count_after_first = Sticker.objects.filter(album=album).count()
+        call_command("seed_carros_de_fer", stdout=StringIO())
+        self.assertEqual(Sticker.objects.filter(album=album).count(), count_after_first)
+        self.assertEqual(Album.objects.filter(title="Carros de Fer").count(), 1)
+
+    def test_reset_recreates_album(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from albums.models import Album
+
+        call_command("seed_carros_de_fer", stdout=StringIO())
+        first_id = Album.objects.get(title="Carros de Fer").id
+        call_command("seed_carros_de_fer", "--reset", stdout=StringIO())
+        new_id = Album.objects.get(title="Carros de Fer").id
+        self.assertNotEqual(first_id, new_id)

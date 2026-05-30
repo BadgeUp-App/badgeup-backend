@@ -2487,3 +2487,93 @@ class OpenAIClientTests(APITestCase):
              patch.object(oc, "OpenAI", None):
             with self.assertRaises(RuntimeError):
                 oc.get_openai_client()
+
+
+class SyncUserPointsCommandTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, Sticker
+        from achievements.models import UserSticker
+
+        self.user = _make_user(username="syncpts", email="sp@test.com")
+        self.album = Album.objects.create(title="SP", theme="t", description="d")
+        self.sticker = Sticker.objects.create(album=self.album, name="sps", reward_points=30)
+        UserSticker.objects.create(
+            user=self.user, sticker=self.sticker, validated=True,
+            status=UserSticker.STATUS_APPROVED,
+        )
+        self.user.points = 0
+        self.user.save(update_fields=["points"])
+
+    def test_command_syncs_points(self):
+        from io import StringIO
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command("sync_user_points", stdout=out)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.points, 30)
+        self.assertIn("Sincronizados", out.getvalue())
+
+    def test_command_no_change_when_already_synced(self):
+        from io import StringIO
+        from django.core.management import call_command
+
+        self.user.points = 30
+        self.user.save(update_fields=["points"])
+        out = StringIO()
+        call_command("sync_user_points", stdout=out)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.points, 30)
+
+
+class SeedRandomUnlocksCommandTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, Sticker
+
+        self.user = _make_user(username="seeduser", email="seed@test.com")
+        self.album = Album.objects.create(title="SeedA", theme="t", description="d")
+        for i in range(6):
+            Sticker.objects.create(album=self.album, name=f"seed{i}", reward_points=10)
+
+    def test_seeds_unlocks_for_user(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from achievements.models import UserSticker
+
+        out = StringIO()
+        call_command("seed_random_sticker_unlocks", "--per-user", "3", stdout=out)
+        self.assertEqual(UserSticker.objects.filter(user=self.user).count(), 3)
+        self.assertIn("Seeded", out.getvalue())
+
+    def test_purge_then_seed(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from achievements.models import UserSticker
+
+        UserSticker.objects.create(user=self.user, sticker=self.album.stickers.first())
+        out = StringIO()
+        call_command("seed_random_sticker_unlocks", "--per-user", "2", "--purge", stdout=out)
+        self.assertIn("Purged", out.getvalue())
+
+    def test_no_stickers_warns(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from albums.models import Sticker
+
+        Sticker.objects.all().delete()
+        out = StringIO()
+        call_command("seed_random_sticker_unlocks", stdout=out)
+        self.assertIn("No users or stickers found", out.getvalue())
+
+    def test_filter_by_username(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from achievements.models import UserSticker
+
+        other = _make_user(username="seedother", email="so@test.com")
+        out = StringIO()
+        call_command(
+            "seed_random_sticker_unlocks", "--per-user", "2", "--users", "seeduser", stdout=out
+        )
+        self.assertEqual(UserSticker.objects.filter(user=other).count(), 0)
+        self.assertGreater(UserSticker.objects.filter(user=self.user).count(), 0)
