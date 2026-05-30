@@ -933,3 +933,332 @@ class LeaderboardExtendedTests(APITestCase):
 
 # FirebaseLoginViewExtraTests removed: error path tested via test_invalid_firebase_token
 # in FirebaseLoginViewTests.
+
+
+class FirebaseBackendTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        import users.firebase_backend as fb
+
+        fb._initialized = False
+        fb._init_error = None
+
+    def tearDown(self):
+        import users.firebase_backend as fb
+
+        fb._initialized = False
+        fb._init_error = None
+
+    def test_load_credentials_no_env_returns_none(self):
+        import os
+        from unittest.mock import patch
+        from users.firebase_backend import _load_credentials
+
+        env_without = {k: v for k, v in os.environ.items()
+                       if k not in ("FIREBASE_CREDENTIALS_PATH", "FIREBASE_CREDENTIALS_JSON")}
+        with patch.dict(os.environ, env_without, clear=True):
+            self.assertIsNone(_load_credentials())
+
+    def test_load_credentials_with_json_env(self):
+        import os, json
+        from unittest.mock import patch
+        from users.firebase_backend import _load_credentials
+
+        fake_payload = {
+            "type": "service_account",
+            "project_id": "fake",
+            "private_key_id": "pkid",
+            "private_key": "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n",
+            "client_email": "fake@fake.iam.gserviceaccount.com",
+            "client_id": "1",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "x",
+            "client_x509_cert_url": "x",
+        }
+        env_copy = dict(os.environ)
+        env_copy["FIREBASE_CREDENTIALS_JSON"] = json.dumps(fake_payload)
+        env_copy.pop("FIREBASE_CREDENTIALS_PATH", None)
+        with patch.dict(os.environ, env_copy, clear=True), \
+             patch("users.firebase_backend.credentials.Certificate") as mocked_cert:
+            mocked_cert.return_value = "fake-cred-object"
+            result = _load_credentials()
+            self.assertEqual(result, "fake-cred-object")
+            mocked_cert.assert_called_once_with(fake_payload)
+
+    def test_load_credentials_with_path_env(self):
+        import os
+        from unittest.mock import patch
+        from users.firebase_backend import _load_credentials
+
+        env_copy = dict(os.environ)
+        env_copy["FIREBASE_CREDENTIALS_PATH"] = "/tmp/fake.json"
+        env_copy.pop("FIREBASE_CREDENTIALS_JSON", None)
+        with patch.dict(os.environ, env_copy, clear=True), \
+             patch("users.firebase_backend.os.path.isfile", return_value=True), \
+             patch("users.firebase_backend.credentials.Certificate") as mocked_cert:
+            mocked_cert.return_value = "from-path"
+            result = _load_credentials()
+            self.assertEqual(result, "from-path")
+            mocked_cert.assert_called_once_with("/tmp/fake.json")
+
+    def test_ensure_initialized_no_credentials_returns_error(self):
+        from unittest.mock import patch
+        from users.firebase_backend import ensure_initialized
+
+        with patch("users.firebase_backend._load_credentials", return_value=None):
+            ok, err = ensure_initialized()
+            self.assertFalse(ok)
+            self.assertIn("Firebase no configurado", err)
+
+    def test_ensure_initialized_with_valid_cred(self):
+        from unittest.mock import patch, MagicMock
+        from users.firebase_backend import ensure_initialized
+
+        fake_cred = MagicMock()
+        with patch("users.firebase_backend._load_credentials", return_value=fake_cred), \
+             patch("users.firebase_backend.firebase_admin.initialize_app") as mocked:
+            ok, err = ensure_initialized()
+            self.assertTrue(ok)
+            self.assertIsNone(err)
+            mocked.assert_called_once_with(fake_cred)
+
+    def test_ensure_initialized_swallows_already_initialized_error(self):
+        from unittest.mock import patch, MagicMock
+        from users.firebase_backend import ensure_initialized
+
+        fake_cred = MagicMock()
+        with patch("users.firebase_backend._load_credentials", return_value=fake_cred), \
+             patch("users.firebase_backend.firebase_admin.initialize_app",
+                   side_effect=ValueError("already exists")):
+            ok, err = ensure_initialized()
+            self.assertTrue(ok)
+            self.assertIsNone(err)
+
+    def test_ensure_initialized_caches_success(self):
+        from unittest.mock import patch, MagicMock
+        from users.firebase_backend import ensure_initialized
+
+        fake_cred = MagicMock()
+        with patch("users.firebase_backend._load_credentials", return_value=fake_cred), \
+             patch("users.firebase_backend.firebase_admin.initialize_app"):
+            ensure_initialized()
+        with patch("users.firebase_backend._load_credentials") as second:
+            ok, err = ensure_initialized()
+            self.assertTrue(ok)
+            second.assert_not_called()
+
+    def test_ensure_initialized_catches_generic_exception(self):
+        from unittest.mock import patch
+        from users.firebase_backend import ensure_initialized
+
+        with patch("users.firebase_backend._load_credentials", side_effect=RuntimeError("boom")):
+            ok, err = ensure_initialized()
+            self.assertFalse(ok)
+            self.assertIn("No se pudo inicializar", err)
+
+    def test_verify_id_token_init_failure(self):
+        from unittest.mock import patch
+        from users.firebase_backend import verify_id_token
+
+        with patch(
+            "users.firebase_backend.ensure_initialized",
+            return_value=(False, "init failed"),
+        ):
+            decoded, err = verify_id_token("any-token")
+            self.assertIsNone(decoded)
+            self.assertEqual(err, "init failed")
+
+    def test_verify_id_token_success(self):
+        from unittest.mock import patch
+        from users.firebase_backend import verify_id_token
+
+        with patch(
+            "users.firebase_backend.ensure_initialized", return_value=(True, None)
+        ), patch(
+            "users.firebase_backend.firebase_auth.verify_id_token",
+            return_value={"uid": "abc", "email": "x@y.com"},
+        ):
+            decoded, err = verify_id_token("valid-token")
+            self.assertEqual(decoded, {"uid": "abc", "email": "x@y.com"})
+            self.assertIsNone(err)
+
+    def test_verify_id_token_invalid(self):
+        from unittest.mock import patch
+        from users.firebase_backend import verify_id_token
+
+        with patch(
+            "users.firebase_backend.ensure_initialized", return_value=(True, None)
+        ), patch(
+            "users.firebase_backend.firebase_auth.verify_id_token",
+            side_effect=ValueError("invalid signature"),
+        ):
+            decoded, err = verify_id_token("bad-token")
+            self.assertIsNone(decoded)
+            self.assertIn("ValueError", err)
+
+
+class JWTAuthMiddlewareTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="mid",
+            email="mid@a.com",
+            password="S3curePass!2026",
+        )
+
+    def _make_token(self, user):
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        return str(RefreshToken.for_user(user).access_token)
+
+    def _run_middleware(self, scope_in):
+        import asyncio
+        from users.middleware import JWTAuthMiddleware
+
+        captured = {}
+
+        async def inner_app(scope, receive, send):
+            captured["scope"] = scope
+
+        async def runner():
+            mw = JWTAuthMiddleware(inner_app)
+            await mw(scope_in, None, None)
+
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(runner())
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
+        return captured["scope"]
+
+    def test_middleware_with_valid_token_attaches_user(self):
+        from unittest.mock import patch
+
+        user_ref = self.user
+        token = self._make_token(user_ref)
+        scope_in = {"query_string": f"token={token}".encode()}
+
+        def fake_wrap(sync_callable):
+            async def call(*args, **kwargs):
+                return user_ref
+
+            return call
+
+        with patch("users.middleware.database_sync_to_async", side_effect=fake_wrap):
+            scope_out = self._run_middleware(scope_in)
+            self.assertEqual(scope_out["user"].id, user_ref.id)
+
+    def test_middleware_no_token_user_is_none(self):
+        scope_in = {"query_string": b""}
+        scope_out = self._run_middleware(scope_in)
+        self.assertIsNone(scope_out["user"])
+
+    def test_middleware_invalid_token_user_is_none(self):
+        import jwt as pyjwt
+        from django.conf import settings
+
+        forged = pyjwt.encode(
+            {"user_id": 99999, "exp": 9999999999, "token_type": "access", "jti": "x"},
+            "WRONG_SECRET",
+            algorithm="HS256",
+        )
+        scope_in = {"query_string": f"token={forged}".encode()}
+        scope_out = self._run_middleware(scope_in)
+        self.assertIsNone(scope_out["user"])
+
+    def test_middleware_token_for_deleted_user(self):
+        from unittest.mock import patch
+
+        token = self._make_token(self.user)
+        scope_in = {"query_string": f"token={token}".encode()}
+
+        def fake_wrap(sync_callable):
+            async def call(*args, **kwargs):
+                raise User.DoesNotExist()
+
+            return call
+
+        with patch("users.middleware.database_sync_to_async", side_effect=fake_wrap):
+            scope_out = self._run_middleware(scope_in)
+            self.assertIsNone(scope_out["user"])
+
+
+class PushServiceTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="pu", email="pu@a.com", password="S3curePass!2026"
+        )
+
+    def test_send_push_without_token_returns_none(self):
+        from users.push import send_push
+
+        self.user.fcm_token = ""
+        self.user.save(update_fields=["fcm_token"])
+        self.assertIsNone(send_push(self.user, "Hi", "Body"))
+
+    def test_send_push_when_firebase_not_initialized(self):
+        from unittest.mock import patch
+        from users.push import send_push
+
+        self.user.fcm_token = "valid-token"
+        self.user.save(update_fields=["fcm_token"])
+        with patch(
+            "users.push.ensure_initialized",
+            return_value=(False, "not configured"),
+        ):
+            self.assertIsNone(send_push(self.user, "x", "y"))
+
+    def test_send_push_success_returns_message_id(self):
+        from unittest.mock import patch
+        from users.push import send_push
+
+        self.user.fcm_token = "valid-token"
+        self.user.save(update_fields=["fcm_token"])
+        with patch(
+            "users.push.ensure_initialized", return_value=(True, None)
+        ), patch("users.push.messaging.send", return_value="msg-id-123"):
+            result = send_push(self.user, "T", "B", data={"a": 1})
+            self.assertEqual(result, "msg-id-123")
+
+    def test_send_push_unregistered_clears_token(self):
+        from unittest.mock import patch
+        from firebase_admin import messaging
+        from users.push import send_push
+
+        self.user.fcm_token = "stale-token"
+        self.user.fcm_platform = "ios"
+        self.user.save(update_fields=["fcm_token", "fcm_platform"])
+        with patch(
+            "users.push.ensure_initialized", return_value=(True, None)
+        ), patch(
+            "users.push.messaging.send",
+            side_effect=messaging.UnregisteredError("stale"),
+        ):
+            result = send_push(self.user, "T", "B")
+            self.assertIsNone(result)
+            self.user.refresh_from_db()
+            self.assertEqual(self.user.fcm_token, "")
+            self.assertEqual(self.user.fcm_platform, "")
+
+    def test_send_push_generic_exception_returns_none(self):
+        from unittest.mock import patch
+        from users.push import send_push
+
+        self.user.fcm_token = "valid"
+        self.user.save(update_fields=["fcm_token"])
+        with patch(
+            "users.push.ensure_initialized", return_value=(True, None)
+        ), patch("users.push.messaging.send", side_effect=RuntimeError("network")):
+            self.assertIsNone(send_push(self.user, "T", "B"))
+
+    def test_send_push_strips_token_whitespace(self):
+        from unittest.mock import patch
+        from users.push import send_push
+
+        self.user.fcm_token = "   "
+        self.user.save(update_fields=["fcm_token"])
+        self.assertIsNone(send_push(self.user, "x", "y"))
