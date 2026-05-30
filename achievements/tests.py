@@ -3,7 +3,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import ChatMessage, FriendRequest
+from .models import ChatMessage, FriendRequest, UserSticker
 
 User = get_user_model()
 
@@ -770,6 +770,309 @@ class ImagePayloadTests(APITestCase):
         from achievements.services import _sticker_reference_payload
 
         self.assertIsNone(_sticker_reference_payload(self.sticker))
+
+
+class UtilsTests(APITestCase):
+    def setUp(self):
+        self.alice = _make_user(username="ua1", email="ua1@test.com")
+        self.bob = _make_user(username="ub1", email="ub1@test.com")
+        self.eve = _make_user(username="ue1", email="ue1@test.com")
+
+    def test_get_friend_ids_no_friends(self):
+        from achievements.utils import get_friend_ids
+
+        result = get_friend_ids(self.alice.id)
+        self.assertEqual(result, [])
+
+    def test_get_friend_ids_with_outgoing(self):
+        from achievements.utils import get_friend_ids
+
+        FriendRequest.objects.create(
+            from_user=self.alice,
+            to_user=self.bob,
+            status=FriendRequest.STATUS_ACCEPTED,
+        )
+        result = get_friend_ids(self.alice.id)
+        self.assertEqual(set(result), {self.bob.id})
+
+    def test_get_friend_ids_with_incoming(self):
+        from achievements.utils import get_friend_ids
+
+        FriendRequest.objects.create(
+            from_user=self.bob,
+            to_user=self.alice,
+            status=FriendRequest.STATUS_ACCEPTED,
+        )
+        result = get_friend_ids(self.alice.id)
+        self.assertEqual(set(result), {self.bob.id})
+
+    def test_get_friend_ids_dedupes(self):
+        from achievements.utils import get_friend_ids
+
+        FriendRequest.objects.create(
+            from_user=self.alice,
+            to_user=self.bob,
+            status=FriendRequest.STATUS_ACCEPTED,
+        )
+        FriendRequest.objects.create(
+            from_user=self.alice,
+            to_user=self.eve,
+            status=FriendRequest.STATUS_ACCEPTED,
+        )
+        result = get_friend_ids(self.alice.id)
+        self.assertEqual(set(result), {self.bob.id, self.eve.id})
+
+    def test_get_friend_ids_excludes_pending(self):
+        from achievements.utils import get_friend_ids
+
+        FriendRequest.objects.create(
+            from_user=self.alice,
+            to_user=self.bob,
+            status=FriendRequest.STATUS_PENDING,
+        )
+        result = get_friend_ids(self.alice.id)
+        self.assertEqual(result, [])
+
+    def test_send_notification_no_channel_layer(self):
+        from unittest.mock import patch
+        from achievements.utils import send_notification
+
+        with patch("achievements.utils.get_channel_layer", return_value=None):
+            send_notification([1, 2], {"x": "y"})
+
+    def test_send_notification_with_layer_and_broadcast(self):
+        from unittest.mock import patch, MagicMock
+        from achievements.utils import send_notification
+
+        layer = MagicMock()
+        with patch("achievements.utils.get_channel_layer", return_value=layer), \
+             patch("achievements.utils.async_to_sync") as mocked_a2s:
+            mocked_a2s.return_value = lambda *a, **kw: None
+            send_notification([1, 2], {"x": "y"}, broadcast=True)
+            self.assertGreaterEqual(mocked_a2s.call_count, 1)
+
+    def test_send_notification_swallows_exception(self):
+        from unittest.mock import patch
+        from achievements.utils import send_notification
+
+        with patch(
+            "achievements.utils.get_channel_layer",
+            side_effect=RuntimeError("layer down"),
+        ):
+            send_notification([1], {"a": "b"})
+
+    def test_compute_user_points_no_stickers(self):
+        from achievements.utils import compute_user_points
+
+        self.assertEqual(compute_user_points(self.alice), 0)
+
+    def test_compute_user_points_with_approved(self):
+        from albums.models import Album, Sticker
+        from achievements.utils import compute_user_points
+
+        album = Album.objects.create(title="UP", theme="t")
+        s1 = Sticker.objects.create(album=album, name="a", reward_points=10)
+        s2 = Sticker.objects.create(album=album, name="b", reward_points=20)
+        s3 = Sticker.objects.create(album=album, name="c", reward_points=99)
+        UserSticker.objects.create(user=self.alice, sticker=s1, status=UserSticker.STATUS_APPROVED)
+        UserSticker.objects.create(user=self.alice, sticker=s2, status=UserSticker.STATUS_APPROVED)
+        UserSticker.objects.create(user=self.alice, sticker=s3, status=UserSticker.STATUS_PENDING)
+        self.assertEqual(compute_user_points(self.alice), 30)
+
+    def test_compute_user_points_with_sticker_unlock_model(self):
+        from unittest.mock import patch, MagicMock
+        from achievements.utils import compute_user_points
+
+        fake_model = MagicMock()
+        fake_qs = MagicMock()
+        fake_qs.aggregate.return_value = {"total": 42}
+        fake_model.objects.filter.return_value = fake_qs
+        with patch("achievements.utils.apps.get_model", return_value=fake_model):
+            self.assertEqual(compute_user_points(self.alice), 42)
+
+
+class ValidateUserStickerTaskTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, Sticker
+
+        self.user = _make_user(username="vu", email="vu@test.com")
+        self.album = Album.objects.create(title="VAlb", theme="t", description="d")
+        self.sticker = Sticker.objects.create(album=self.album, name="vs", reward_points=15)
+        self.us = UserSticker.objects.create(
+            user=self.user, sticker=self.sticker, status=UserSticker.STATUS_PENDING
+        )
+
+    def test_task_returns_when_user_sticker_not_found(self):
+        from achievements.tasks import validate_user_sticker
+
+        validate_user_sticker(99999)
+
+    def test_task_skips_already_validated(self):
+        from achievements.tasks import validate_user_sticker
+
+        self.us.validated = True
+        self.us.save(update_fields=["validated"])
+        validate_user_sticker(self.us.id)
+        self.us.refresh_from_db()
+        self.assertTrue(self.us.validated)
+
+    def test_task_error_sets_status_pending(self):
+        from unittest.mock import patch
+        from achievements.tasks import validate_user_sticker
+
+        with patch(
+            "achievements.tasks.analyze_user_sticker",
+            return_value={"error": "openai down"},
+        ):
+            validate_user_sticker(self.us.id)
+        self.us.refresh_from_db()
+        self.assertEqual(self.us.status, UserSticker.STATUS_PENDING)
+        self.assertFalse(self.us.validated)
+
+    def test_task_approves_when_result_approved(self):
+        from unittest.mock import patch
+        from achievements.tasks import validate_user_sticker
+
+        with patch(
+            "achievements.tasks.analyze_user_sticker",
+            return_value={
+                "approved": True,
+                "match_score": 0.9,
+                "is_match": True,
+                "reason": "exact",
+            },
+        ):
+            validate_user_sticker(self.us.id)
+        self.us.refresh_from_db()
+        self.assertEqual(self.us.status, UserSticker.STATUS_APPROVED)
+        self.assertTrue(self.us.validated)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.points, 15)
+
+    def test_task_rejects_when_result_not_approved(self):
+        from unittest.mock import patch
+        from achievements.tasks import validate_user_sticker
+
+        with patch(
+            "achievements.tasks.analyze_user_sticker",
+            return_value={
+                "approved": False,
+                "match_score": 0.2,
+                "is_match": False,
+                "reason": "no match",
+            },
+        ):
+            validate_user_sticker(self.us.id)
+        self.us.refresh_from_db()
+        self.assertEqual(self.us.status, UserSticker.STATUS_REJECTED)
+        self.assertFalse(self.us.validated)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.points, 0)
+
+
+class AnalyzeUserStickerEdgeTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, Sticker
+
+        self.user = _make_user(username="aus", email="aus@test.com")
+        self.album = Album.objects.create(title="AUS", theme="t", description="d")
+        self.sticker = Sticker.objects.create(
+            album=self.album,
+            name="ferrari",
+            description="rojo italiano clasico",
+        )
+
+    def _make_user_sticker(self):
+        us = UserSticker.objects.create(
+            user=self.user,
+            sticker=self.sticker,
+            photo_url="https://example.com/photo.jpg",
+        )
+        return us
+
+    def test_analyze_user_sticker_without_image(self):
+        from achievements.services import analyze_user_sticker
+
+        us = UserSticker.objects.create(user=self.user, sticker=self.sticker)
+        result = analyze_user_sticker(us)
+        self.assertFalse(result["approved"])
+        self.assertIn("No image", result["reason"])
+
+    def test_analyze_user_sticker_disabled_auto_approves(self):
+        from django.test import override_settings
+        from achievements.services import analyze_user_sticker
+
+        us = self._make_user_sticker()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=False):
+            result = analyze_user_sticker(us)
+        self.assertTrue(result["approved"])
+
+    def test_analyze_user_sticker_high_match_approved(self):
+        from django.test import override_settings
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_user_sticker
+
+        us = self._make_user_sticker()
+
+        fake_response = MagicMock()
+        fake_response.output_text = (
+            '{"match_score": 0.92, "is_match": true, "reason": "exact"}'
+        )
+        fake_response.id = "resp_123"
+        fake_client = MagicMock()
+        fake_client.responses.create.return_value = fake_response
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"), \
+             patch(
+                 "achievements.services.get_openai_client",
+                 return_value=fake_client,
+             ):
+            result = analyze_user_sticker(us)
+        self.assertTrue(result["approved"])
+        self.assertEqual(result["match_score"], 0.92)
+
+    def test_analyze_user_sticker_low_match_rejected(self):
+        from django.test import override_settings
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_user_sticker
+
+        us = self._make_user_sticker()
+
+        fake_response = MagicMock()
+        fake_response.output_text = (
+            '{"match_score": 0.3, "is_match": false, "reason": "different"}'
+        )
+        fake_client = MagicMock()
+        fake_client.responses.create.return_value = fake_response
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"), \
+             patch(
+                 "achievements.services.get_openai_client",
+                 return_value=fake_client,
+             ):
+            result = analyze_user_sticker(us)
+        self.assertFalse(result["approved"])
+
+    def test_analyze_user_sticker_invalid_json_returns_error(self):
+        from django.test import override_settings
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_user_sticker
+
+        us = self._make_user_sticker()
+
+        fake_response = MagicMock()
+        fake_response.output_text = "not json"
+        fake_client = MagicMock()
+        fake_client.responses.create.return_value = fake_response
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True, OPENAI_API_KEY="x"), \
+             patch(
+                 "achievements.services.get_openai_client",
+                 return_value=fake_client,
+             ):
+            result = analyze_user_sticker(us)
+        self.assertFalse(result["approved"])
+        self.assertIn("Invalid JSON", result["error"])
 
 
 class StickerUnlockViewTests(APITestCase):
