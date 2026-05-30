@@ -589,6 +589,34 @@ class AnalyzeCarPhotoSimpleTests(APITestCase):
         self.assertIn("confidence", result)
         self.assertIn("sticker_id", result)
 
+    def test_photo_read_exception_returns_none(self):
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_car_photo
+        from django.test import override_settings
+
+        class BrokenStream:
+            def read(self):
+                raise IOError("cannot read photo")
+
+            def seek(self, *a):
+                pass
+
+        fake_client = MagicMock()
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True), \
+             patch("achievements.services.get_openai_client", return_value=fake_client):
+            result = analyze_car_photo(BrokenStream(), [])
+        self.assertIsNone(result)
+
+    def test_client_init_failure_returns_none(self):
+        from unittest.mock import patch
+        from achievements.services import analyze_car_photo
+        from django.test import override_settings
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True), \
+             patch("achievements.services.get_openai_client", side_effect=RuntimeError("no key")):
+            result = analyze_car_photo(self._fake_image_bytes(), [])
+        self.assertIsNone(result)
+
 
 class AnalyzeUserStickerSimpleTests(APITestCase):
     def setUp(self):
@@ -624,6 +652,49 @@ class AnalyzeUserStickerSimpleTests(APITestCase):
         with override_settings(USE_OPENAI_STICKER_VALIDATION=True):
             result = analyze_user_sticker(us)
         self.assertFalse(result["approved"])
+
+    def test_with_description_and_reference_image_builds_full_prompt(self):
+        from unittest.mock import patch, MagicMock
+        from django.test import override_settings
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from achievements.services import analyze_user_sticker
+        from PIL import Image
+        import io, json
+
+        img = Image.new("RGB", (10, 10), color=(7, 7, 7))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        self.sticker.description = "Ferrari rojo descapotable"
+        self.sticker.image_reference = SimpleUploadedFile(
+            "ref.jpg", buf.getvalue(), content_type="image/jpeg"
+        )
+        self.sticker.save(update_fields=["description", "image_reference"])
+
+        captured = {}
+        fake_response = MagicMock()
+        fake_response.output_text = json.dumps(
+            {"match_score": 0.9, "is_match": True, "reason": "ok"}
+        )
+        fake_response.id = "resp_xyz"
+        fake_client = MagicMock()
+        fake_client.responses.create.side_effect = lambda *a, **kw: (
+            captured.update(kw) or fake_response
+        )
+
+        with override_settings(USE_OPENAI_STICKER_VALIDATION=True), \
+             patch("achievements.services.get_openai_client", return_value=fake_client), \
+             patch.object(
+                 type(self.sticker.image_reference), "open",
+                 return_value=io.BytesIO(buf.getvalue()),
+             ):
+            result = analyze_user_sticker(self.user_sticker)
+
+        self.assertTrue(result["approved"])
+        content = captured["input"][0]["content"]
+        prompt_text = content[0]["text"]
+        self.assertIn("Ferrari rojo descapotable", prompt_text)
+        self.assertIn("Álbum:", prompt_text)
+        self.assertGreaterEqual(len(content), 3)
 
     def test_match_returns_approved(self):
         from unittest.mock import patch, MagicMock
@@ -1126,6 +1197,123 @@ class ImagePayloadTests(APITestCase):
         from achievements.services import _sticker_reference_payload
 
         self.assertIsNone(_sticker_reference_payload(self.sticker))
+
+    def _attach_photo(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        import io
+
+        img = Image.new("RGB", (10, 10), color=(20, 20, 20))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        self.user_sticker.photo = SimpleUploadedFile(
+            "up.jpg", buf.getvalue(), content_type="image/jpeg"
+        )
+        self.user_sticker.save(update_fields=["photo"])
+
+    def test_photo_read_success_returns_base64(self):
+        from achievements.services import _image_payload
+
+        self._attach_photo()
+        payload = _image_payload(self.user_sticker)
+        self.assertEqual(payload["type"], "input_image")
+        self.assertTrue(payload["image_url"].startswith("data:image/jpeg;base64,"))
+
+    def test_photo_file_not_found_returns_none(self):
+        from unittest.mock import patch
+        from achievements.services import _image_payload
+
+        self._attach_photo()
+        with patch.object(
+            type(self.user_sticker.photo), "open", side_effect=FileNotFoundError
+        ):
+            payload = _image_payload(self.user_sticker)
+        self.assertIsNone(payload)
+
+    def test_photo_not_implemented_falls_back_to_url(self):
+        from unittest.mock import patch, PropertyMock
+        from achievements.services import _image_payload
+
+        self._attach_photo()
+        with patch.object(
+            type(self.user_sticker.photo), "open", side_effect=NotImplementedError
+        ), patch.object(
+            type(self.user_sticker.photo), "url", new_callable=PropertyMock,
+            return_value="https://cdn.example.com/up.jpg",
+        ):
+            payload = _image_payload(self.user_sticker)
+        self.assertEqual(payload["image_url"], "https://cdn.example.com/up.jpg")
+
+    def test_photo_value_error_on_url_returns_none(self):
+        from unittest.mock import patch, PropertyMock
+        from achievements.services import _image_payload
+
+        self._attach_photo()
+        with patch.object(
+            type(self.user_sticker.photo), "open", side_effect=ValueError
+        ), patch.object(
+            type(self.user_sticker.photo), "url", new_callable=PropertyMock,
+            side_effect=ValueError,
+        ):
+            payload = _image_payload(self.user_sticker)
+        self.assertIsNone(payload)
+
+    def _attach_reference(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        import io
+
+        img = Image.new("RGB", (10, 10), color=(60, 60, 60))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        self.sticker.image_reference = SimpleUploadedFile(
+            "ref.jpg", buf.getvalue(), content_type="image/jpeg"
+        )
+        self.sticker.save(update_fields=["image_reference"])
+
+    def test_reference_read_success_returns_base64(self):
+        from achievements.services import _sticker_reference_payload
+
+        self._attach_reference()
+        payload = _sticker_reference_payload(self.sticker)
+        self.assertTrue(payload["image_url"].startswith("data:image/jpeg;base64,"))
+
+    def test_reference_file_not_found_returns_none(self):
+        from unittest.mock import patch
+        from achievements.services import _sticker_reference_payload
+
+        self._attach_reference()
+        with patch.object(
+            type(self.sticker.image_reference), "open", side_effect=FileNotFoundError
+        ):
+            self.assertIsNone(_sticker_reference_payload(self.sticker))
+
+    def test_reference_not_implemented_falls_back_to_url(self):
+        from unittest.mock import patch, PropertyMock
+        from achievements.services import _sticker_reference_payload
+
+        self._attach_reference()
+        with patch.object(
+            type(self.sticker.image_reference), "open", side_effect=NotImplementedError
+        ), patch.object(
+            type(self.sticker.image_reference), "url", new_callable=PropertyMock,
+            return_value="https://cdn.example.com/ref.jpg",
+        ):
+            payload = _sticker_reference_payload(self.sticker)
+        self.assertEqual(payload["image_url"], "https://cdn.example.com/ref.jpg")
+
+    def test_reference_value_error_on_url_returns_none(self):
+        from unittest.mock import patch, PropertyMock
+        from achievements.services import _sticker_reference_payload
+
+        self._attach_reference()
+        with patch.object(
+            type(self.sticker.image_reference), "open", side_effect=ValueError
+        ), patch.object(
+            type(self.sticker.image_reference), "url", new_callable=PropertyMock,
+            side_effect=ValueError,
+        ):
+            self.assertIsNone(_sticker_reference_payload(self.sticker))
 
 
 class UtilsTests(APITestCase):
@@ -2082,3 +2270,134 @@ class AnalyzePhotoGlobalCatalogTests(APITestCase):
             result = analyze_photo_global(self._fake_image_bytes(), [FakeBrokenAlbum()])
 
         self.assertIsNotNone(result)
+
+    def test_person_album_with_reference_photos_attaches_images(self):
+        from django.test import override_settings
+        from unittest.mock import patch, MagicMock
+        from albums.models import Album, Sticker, StickerReferencePhoto
+        from achievements.services import analyze_photo_global
+
+        album = Album.objects.create(
+            title="Profes con foto",
+            theme="profes",
+            description="d",
+            tags="profes,personas",
+        )
+        sticker = Sticker.objects.create(album=album, name="Profe Ana")
+        ref = StickerReferencePhoto.objects.create(sticker=sticker, label="frente")
+
+        captured = []
+        completion = self._fake_main_response()
+        fake_main = MagicMock()
+        fake_main.chat.completions.create.side_effect = lambda *a, **kw: (
+            captured.append(kw.get("messages", [])) or completion
+        )
+
+        with override_settings(VISION_PREFILTER_ENABLED=False), \
+             patch("achievements.services.get_openai_client", return_value=fake_main), \
+             patch.object(
+                 type(ref.photo), "url", new_callable=__import__("unittest.mock", fromlist=["PropertyMock"]).PropertyMock,
+                 return_value="https://cdn.example.com/ref-ana.jpg",
+             ):
+            analyze_photo_global(
+                self._fake_image_bytes(),
+                Album.objects.prefetch_related("stickers", "stickers__reference_photos").all(),
+            )
+
+        system_text = captured[0][0]["content"]
+        self.assertIn("PERSONAS CON REFERENCIA VISUAL", system_text)
+        user_content = captured[0][1]["content"]
+        has_ref_image = any(
+            c.get("type") == "image_url"
+            and "cdn.example.com/ref-ana.jpg" in str(c.get("image_url", {}))
+            for c in user_content
+        )
+        self.assertTrue(has_ref_image)
+
+    def test_person_album_reference_url_exception_swallowed(self):
+        from django.test import override_settings
+        from unittest.mock import patch, MagicMock, PropertyMock
+        from albums.models import Album, Sticker, StickerReferencePhoto
+        from achievements.services import analyze_photo_global
+
+        album = Album.objects.create(
+            title="Profes rotos", theme="profes", description="d", tags="profes",
+        )
+        sticker = Sticker.objects.create(album=album, name="Profe Z")
+        ref = StickerReferencePhoto.objects.create(sticker=sticker, label="x")
+
+        completion = self._fake_main_response()
+        fake_main = MagicMock()
+        fake_main.chat.completions.create.return_value = completion
+
+        with override_settings(VISION_PREFILTER_ENABLED=False), \
+             patch("achievements.services.get_openai_client", return_value=fake_main), \
+             patch.object(
+                 type(ref.photo), "url", new_callable=PropertyMock, side_effect=ValueError,
+             ):
+            result = analyze_photo_global(
+                self._fake_image_bytes(),
+                Album.objects.prefetch_related("stickers", "stickers__reference_photos").all(),
+            )
+        self.assertIsNotNone(result)
+
+    def test_photo_read_exception_returns_none(self):
+        from django.test import override_settings
+        from achievements.services import analyze_photo_global
+
+        class BrokenStream:
+            def read(self):
+                raise IOError("cannot read")
+
+            def seek(self, *a):
+                pass
+
+        with override_settings(VISION_PREFILTER_ENABLED=False):
+            result = analyze_photo_global(BrokenStream(), [])
+        self.assertIsNone(result)
+
+    def test_person_album_single_image_reference_attaches(self):
+        from django.test import override_settings
+        from unittest.mock import patch, MagicMock, PropertyMock
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        import io
+        from albums.models import Album, Sticker
+        from achievements.services import analyze_photo_global
+
+        album = Album.objects.create(
+            title="Profes single ref", theme="profes", description="d", tags="profes,personas",
+        )
+        img = Image.new("RGB", (10, 10), color=(5, 5, 5))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        sticker = Sticker.objects.create(
+            album=album, name="Profe Solo",
+            image_reference=SimpleUploadedFile("r.jpg", buf.getvalue(), content_type="image/jpeg"),
+        )
+
+        captured = []
+        completion = self._fake_main_response()
+        fake_main = MagicMock()
+        fake_main.chat.completions.create.side_effect = lambda *a, **kw: (
+            captured.append(kw.get("messages", [])) or completion
+        )
+
+        with override_settings(VISION_PREFILTER_ENABLED=False), \
+             patch("achievements.services.get_openai_client", return_value=fake_main), \
+             patch.object(
+                 type(sticker.image_reference), "url", new_callable=PropertyMock,
+                 return_value="https://cdn.example.com/profe-solo.jpg",
+             ):
+            analyze_photo_global(
+                self._fake_image_bytes(),
+                Album.objects.prefetch_related("stickers", "stickers__reference_photos").all(),
+            )
+
+        user_content = captured[0][1]["content"]
+        has_ref = any(
+            c.get("type") == "image_url"
+            and "profe-solo.jpg" in str(c.get("image_url", {}))
+            for c in user_content
+        )
+        self.assertTrue(has_ref)
