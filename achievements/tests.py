@@ -770,3 +770,209 @@ class ImagePayloadTests(APITestCase):
         from achievements.services import _sticker_reference_payload
 
         self.assertIsNone(_sticker_reference_payload(self.sticker))
+
+
+class AnalyzePhotoGlobalCatalogTests(APITestCase):
+    def _fake_image_bytes(self):
+        from PIL import Image
+        import io
+
+        img = Image.new("RGB", (200, 200), color=(50, 100, 150))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        buf.seek(0)
+        return buf
+
+    def _fake_main_response(self, matches=None):
+        import json
+        from unittest.mock import MagicMock
+
+        payload = {
+            "recognized": True,
+            "item_count": len(matches or []),
+            "photo_category": "test",
+            "matches": matches or [],
+            "fun_fact": "ok",
+        }
+        msg = MagicMock()
+        msg.message.content = json.dumps(payload)
+        return MagicMock(choices=[msg])
+
+    def test_catalog_includes_album_and_stickers_text(self):
+        from django.test import override_settings
+        from unittest.mock import patch, MagicMock
+        from albums.models import Album, Sticker
+        from achievements.services import analyze_photo_global
+
+        album = Album.objects.create(
+            title="Carros JDM",
+            theme="autos",
+            description="d",
+            tags="autos,jdm,deportivos",
+        )
+        s1 = Sticker.objects.create(album=album, name="Skyline", description="R34")
+
+        captured = []
+        completion = self._fake_main_response()
+        fake_main = MagicMock()
+        fake_main.chat.completions.create.side_effect = lambda *a, **kw: (
+            captured.append(kw.get("messages", [])) or completion
+        )
+
+        with override_settings(VISION_PREFILTER_ENABLED=False), \
+             patch("achievements.services.get_openai_client", return_value=fake_main):
+            analyze_photo_global(
+                self._fake_image_bytes(), Album.objects.prefetch_related("stickers").all()
+            )
+
+        system_text = captured[0][0]["content"]
+        self.assertIn("PASO 1", system_text)
+        user_content = captured[0][1]["content"]
+        catalog_text = next(
+            (c["text"] for c in user_content if c.get("type") == "text"
+             and "Carros JDM" in c.get("text", "")),
+            None,
+        )
+        self.assertIsNotNone(catalog_text)
+        self.assertIn("Skyline", catalog_text)
+        self.assertIn(str(s1.id), catalog_text)
+
+    def test_custom_prompt_album_is_appended(self):
+        from django.test import override_settings
+        from unittest.mock import patch, MagicMock
+        from albums.models import Album
+        from achievements.services import analyze_photo_global
+
+        Album.objects.create(
+            title="Especial",
+            theme="custom",
+            description="d",
+            tags="autos",
+            custom_prompt="Reglas extra para este album",
+        )
+
+        captured = []
+        completion = self._fake_main_response()
+        fake_main = MagicMock()
+        fake_main.chat.completions.create.side_effect = lambda *a, **kw: (
+            captured.append(kw.get("messages", [])) or completion
+        )
+
+        with override_settings(VISION_PREFILTER_ENABLED=False), \
+             patch("achievements.services.get_openai_client", return_value=fake_main):
+            analyze_photo_global(
+                self._fake_image_bytes(), Album.objects.prefetch_related("stickers").all()
+            )
+
+        system_text = captured[0][0]["content"]
+        self.assertIn("INSTRUCCIONES ESPECIALES POR ALBUM", system_text)
+        self.assertIn("Reglas extra para este album", system_text)
+
+    def test_person_album_without_refs_uses_text_prompt(self):
+        from django.test import override_settings
+        from unittest.mock import patch, MagicMock
+        from albums.models import Album, Sticker
+        from achievements.services import analyze_photo_global
+
+        album = Album.objects.create(
+            title="Profes ITESO",
+            theme="profes",
+            description="d",
+            tags="profes,personas",
+        )
+        Sticker.objects.create(album=album, name="Profe Juan", description="Cara redonda")
+
+        captured = []
+        completion = self._fake_main_response()
+        fake_main = MagicMock()
+        fake_main.chat.completions.create.side_effect = lambda *a, **kw: (
+            captured.append(kw.get("messages", [])) or completion
+        )
+
+        with override_settings(VISION_PREFILTER_ENABLED=False), \
+             patch("achievements.services.get_openai_client", return_value=fake_main):
+            analyze_photo_global(
+                self._fake_image_bytes(), Album.objects.prefetch_related("stickers").all()
+            )
+
+        system_text = captured[0][0]["content"]
+        self.assertIn("PERSONAS:", system_text)
+        self.assertNotIn("PERSONAS CON REFERENCIA VISUAL", system_text)
+
+    def test_legacy_sticker_id_field_is_promoted_to_matches(self):
+        from django.test import override_settings
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_photo_global
+
+        import json
+
+        legacy_payload = {
+            "recognized": True,
+            "sticker_id": 7,
+            "detected_item": "ford",
+            "confidence": 0.8,
+            "album_id": 1,
+        }
+        msg = MagicMock()
+        msg.message.content = json.dumps(legacy_payload)
+        completion = MagicMock(choices=[msg])
+        fake_main = MagicMock()
+        fake_main.chat.completions.create.return_value = completion
+
+        with override_settings(VISION_PREFILTER_ENABLED=False), \
+             patch("achievements.services.get_openai_client", return_value=fake_main):
+            result = analyze_photo_global(self._fake_image_bytes(), [])
+
+        self.assertEqual(len(result["matches"]), 1)
+        self.assertEqual(result["matches"][0]["sticker_id"], 7)
+        self.assertEqual(result["item_count"], 1)
+
+    def test_match_defaults_filled(self):
+        from django.test import override_settings
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_photo_global
+
+        import json
+
+        payload = {
+            "recognized": True,
+            "matches": [{}],
+            "fun_fact": "x",
+        }
+        msg = MagicMock()
+        msg.message.content = json.dumps(payload)
+        completion = MagicMock(choices=[msg])
+        fake_main = MagicMock()
+        fake_main.chat.completions.create.return_value = completion
+
+        with override_settings(VISION_PREFILTER_ENABLED=False), \
+             patch("achievements.services.get_openai_client", return_value=fake_main):
+            result = analyze_photo_global(self._fake_image_bytes(), [])
+
+        m = result["matches"][0]
+        self.assertEqual(m["confidence"], 0.0)
+        self.assertIsNone(m["sticker_id"])
+        self.assertIsNone(m["album_id"])
+        self.assertEqual(m["detected_item"], "")
+        self.assertEqual(m["detected_category"], "")
+        self.assertEqual(m["reason"], "")
+
+    def test_catalog_exception_is_swallowed_and_continues(self):
+        from django.test import override_settings
+        from unittest.mock import patch, MagicMock
+        from achievements.services import analyze_photo_global
+
+        class FakeBrokenAlbum:
+            @property
+            def tags(self):
+                raise RuntimeError("boom")
+
+        completion = self._fake_main_response()
+        fake_main = MagicMock()
+        fake_main.chat.completions.create.return_value = completion
+
+        with override_settings(VISION_PREFILTER_ENABLED=False), \
+             patch("achievements.services.get_openai_client", return_value=fake_main):
+            result = analyze_photo_global(self._fake_image_bytes(), [FakeBrokenAlbum()])
+
+        self.assertIsNotNone(result)
