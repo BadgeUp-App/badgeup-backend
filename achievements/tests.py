@@ -978,6 +978,247 @@ class ChatMessagePermissionTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
 
 
+class ChatRoomNameTests(APITestCase):
+    def test_chat_room_name_is_order_independent(self):
+        from achievements.consumers import chat_room_name
+
+        self.assertEqual(chat_room_name(1, 2), chat_room_name(2, 1))
+        self.assertEqual(chat_room_name(5, 5), "chat_5_5")
+
+    def test_chat_room_name_format(self):
+        from achievements.consumers import chat_room_name
+
+        self.assertEqual(chat_room_name(10, 3), "chat_3_10")
+
+
+class ChatConsumerTests(APITestCase):
+    def setUp(self):
+        self.alice = _make_user(username="ca", email="ca@test.com")
+        self.bob = _make_user(username="cb", email="cb@test.com")
+        self.eve = _make_user(username="ce", email="ce@test.com")
+        _be_friends(self.alice, self.bob)
+
+    def test_consumer_connects_when_friend(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from achievements.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.scope = {
+                "user": self.alice,
+                "url_route": {"kwargs": {"other_id": str(self.bob.id)}},
+            }
+            c.channel_name = "chan-1"
+            c.channel_layer = AsyncMock()
+            c.accept = AsyncMock()
+            c.close = AsyncMock()
+
+            async def fake_is_friend(*args, **kwargs):
+                return True
+
+            c._is_friend = fake_is_friend
+            await c.connect()
+            c.accept.assert_called_once()
+            c.close.assert_not_called()
+
+        asyncio.run(runner())
+
+    def test_consumer_rejects_when_not_friend(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from achievements.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.scope = {
+                "user": self.alice,
+                "url_route": {"kwargs": {"other_id": str(self.eve.id)}},
+            }
+            c.channel_name = "chan-2"
+            c.channel_layer = AsyncMock()
+            c.accept = AsyncMock()
+            c.close = AsyncMock()
+
+            async def fake_is_friend(*args, **kwargs):
+                return False
+
+            c._is_friend = fake_is_friend
+            await c.connect()
+            c.close.assert_called_once()
+            c.accept.assert_not_called()
+
+        asyncio.run(runner())
+
+    def test_consumer_rejects_unauthenticated(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from achievements.consumers import ChatConsumer
+        from django.contrib.auth.models import AnonymousUser
+
+        async def runner():
+            c = ChatConsumer()
+            c.scope = {
+                "user": AnonymousUser(),
+                "url_route": {"kwargs": {"other_id": str(self.bob.id)}},
+            }
+            c.channel_name = "chan-3"
+            c.channel_layer = AsyncMock()
+            c.accept = AsyncMock()
+            c.close = AsyncMock()
+            await c.connect()
+            c.close.assert_called_once()
+            c.accept.assert_not_called()
+
+        asyncio.run(runner())
+
+    def test_consumer_disconnect_calls_group_discard(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from achievements.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.channel_name = "chan-d"
+            c.room_group_name = "chat_1_2"
+            c.channel_layer = AsyncMock()
+            await c.disconnect(1000)
+            c.channel_layer.group_discard.assert_called_once()
+
+        asyncio.run(runner())
+
+    def test_consumer_receive_empty_text_skipped(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from achievements.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.scope = {
+                "user": self.alice,
+                "url_route": {"kwargs": {"other_id": str(self.bob.id)}},
+            }
+            c.channel_name = "chan-r"
+            c.channel_layer = AsyncMock()
+            await c.receive_json({"text": "   "})
+            c.channel_layer.group_send.assert_not_called()
+
+        asyncio.run(runner())
+
+    def test_consumer_receive_creates_message_and_broadcasts(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from achievements.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.scope = {
+                "user": self.alice,
+                "url_route": {"kwargs": {"other_id": str(self.bob.id)}},
+            }
+            c.channel_name = "chan-msg"
+            c.room_group_name = "chat_alice_bob"
+            c.channel_layer = AsyncMock()
+
+            async def fake_create(sender_id, recipient_id, text):
+                return {"id": 1, "text": text, "sender_id": sender_id}
+
+            c._create_message = fake_create
+            await c.receive_json({"text": "hola bob"})
+            self.assertEqual(c.channel_layer.group_send.call_count, 2)
+
+        asyncio.run(runner())
+
+    def test_consumer_chat_message_handler_sends_payload(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from achievements.consumers import ChatConsumer
+
+        async def runner():
+            c = ChatConsumer()
+            c.send_json = AsyncMock()
+            await c.chat_message({"message": {"text": "hola"}})
+            c.send_json.assert_called_once_with(
+                {"type": "chat_message", "message": {"text": "hola"}}
+            )
+
+        asyncio.run(runner())
+
+
+class NotificationsConsumerTests(APITestCase):
+    def setUp(self):
+        self.user = _make_user(username="nu", email="nu@test.com")
+
+    def test_connect_accepts_authenticated(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from achievements.consumers import NotificationsConsumer
+
+        async def runner():
+            c = NotificationsConsumer()
+            c.scope = {"user": self.user}
+            c.channel_name = "n-1"
+            c.channel_layer = AsyncMock()
+            c.accept = AsyncMock()
+            c.close = AsyncMock()
+            await c.connect()
+            c.accept.assert_called_once()
+            c.close.assert_not_called()
+
+        asyncio.run(runner())
+
+    def test_connect_rejects_anonymous(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from achievements.consumers import NotificationsConsumer
+        from django.contrib.auth.models import AnonymousUser
+
+        async def runner():
+            c = NotificationsConsumer()
+            c.scope = {"user": AnonymousUser()}
+            c.channel_name = "n-2"
+            c.channel_layer = AsyncMock()
+            c.accept = AsyncMock()
+            c.close = AsyncMock()
+            await c.connect()
+            c.close.assert_called_once()
+            c.accept.assert_not_called()
+
+        asyncio.run(runner())
+
+    def test_disconnect_discards_groups(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from achievements.consumers import NotificationsConsumer
+
+        async def runner():
+            c = NotificationsConsumer()
+            c.channel_name = "n-3"
+            c.group_name = "user_42"
+            c.channel_layer = AsyncMock()
+            await c.disconnect(1000)
+            self.assertEqual(c.channel_layer.group_discard.call_count, 2)
+
+        asyncio.run(runner())
+
+    def test_notification_handler_sends_payload(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from achievements.consumers import NotificationsConsumer
+
+        async def runner():
+            c = NotificationsConsumer()
+            c.send_json = AsyncMock()
+            await c.notification(
+                {"payload": {"title": "T", "message": "M"}}
+            )
+            c.send_json.assert_called_once_with(
+                {"type": "notification", "title": "T", "message": "M"}
+            )
+
+        asyncio.run(runner())
+
+
 class AnalyzePhotoGlobalCatalogTests(APITestCase):
     def _fake_image_bytes(self):
         from PIL import Image
