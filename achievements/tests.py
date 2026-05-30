@@ -704,6 +704,167 @@ class AnalyzeUserStickerTests(APITestCase):
         self.assertIn("error", result)
 
 
+class ValidateUserStickerTaskTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, Sticker
+        from achievements.models import UserSticker
+
+        self.user = _make_user(username="taskuser", email="taskuser@test.com")
+        self.album = Album.objects.create(title="TA", theme="t", description="d")
+        self.sticker = Sticker.objects.create(album=self.album, name="taskstick", reward_points=10)
+        self.user_sticker = UserSticker.objects.create(
+            user=self.user, sticker=self.sticker, photo_url="https://example.com/p.jpg"
+        )
+
+    def test_nonexistent_user_sticker_logs_and_returns(self):
+        from achievements.tasks import validate_user_sticker
+
+        validate_user_sticker(99999)
+
+    def test_already_validated_skipped(self):
+        from achievements.models import UserSticker
+        from achievements.tasks import validate_user_sticker
+
+        self.user_sticker.validated = True
+        self.user_sticker.status = UserSticker.STATUS_APPROVED
+        self.user_sticker.save()
+
+        validate_user_sticker(self.user_sticker.id)
+        self.user_sticker.refresh_from_db()
+        self.assertEqual(self.user_sticker.status, UserSticker.STATUS_APPROVED)
+
+    def test_approved_increments_points(self):
+        from unittest.mock import patch
+        from achievements.models import UserSticker
+        from achievements.tasks import validate_user_sticker
+
+        with patch(
+            "achievements.tasks.analyze_user_sticker",
+            return_value={"approved": True, "match_score": 0.95, "is_match": True},
+        ):
+            validate_user_sticker(self.user_sticker.id)
+        self.user_sticker.refresh_from_db()
+        self.user.refresh_from_db()
+        self.assertEqual(self.user_sticker.status, UserSticker.STATUS_APPROVED)
+        self.assertTrue(self.user_sticker.validated)
+        self.assertIsNotNone(self.user_sticker.validated_at)
+        self.assertEqual(self.user.points, 10)
+
+    def test_rejected_keeps_zero_points(self):
+        from unittest.mock import patch
+        from achievements.models import UserSticker
+        from achievements.tasks import validate_user_sticker
+
+        with patch(
+            "achievements.tasks.analyze_user_sticker",
+            return_value={"approved": False, "match_score": 0.2, "is_match": False},
+        ):
+            validate_user_sticker(self.user_sticker.id)
+        self.user_sticker.refresh_from_db()
+        self.user.refresh_from_db()
+        self.assertEqual(self.user_sticker.status, UserSticker.STATUS_REJECTED)
+        self.assertFalse(self.user_sticker.validated)
+        self.assertEqual(self.user.points, 0)
+
+    def test_error_keeps_pending(self):
+        from unittest.mock import patch
+        from achievements.models import UserSticker
+        from achievements.tasks import validate_user_sticker
+
+        with patch(
+            "achievements.tasks.analyze_user_sticker",
+            return_value={"approved": False, "error": "OpenAI dead"},
+        ):
+            validate_user_sticker(self.user_sticker.id)
+        self.user_sticker.refresh_from_db()
+        self.assertEqual(self.user_sticker.status, UserSticker.STATUS_PENDING)
+        self.assertFalse(self.user_sticker.validated)
+
+
+class FirebaseBackendTests(APITestCase):
+    def test_load_credentials_from_json_env(self):
+        from unittest.mock import patch
+        import json
+        from users.firebase_backend import _load_credentials
+
+        fake_cert = {
+            "type": "service_account",
+            "project_id": "test",
+            "private_key_id": "abc",
+            "private_key": "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----",
+            "client_email": "x@y.com",
+            "client_id": "1",
+        }
+        env = {"FIREBASE_CREDENTIALS_JSON": json.dumps(fake_cert)}
+        with patch.dict("os.environ", env, clear=False), \
+             patch("users.firebase_backend.credentials.Certificate") as cert_class:
+            cert_class.return_value = "fake-cert"
+            result = _load_credentials()
+            self.assertEqual(result, "fake-cert")
+
+    def test_load_credentials_returns_none_when_empty(self):
+        from unittest.mock import patch
+        from users.firebase_backend import _load_credentials
+
+        env = {}
+        with patch.dict("os.environ", env, clear=True):
+            result = _load_credentials()
+            self.assertIsNone(result)
+
+    def test_ensure_initialized_no_credentials_returns_false(self):
+        from unittest.mock import patch
+        import users.firebase_backend as fb
+
+        with patch.object(fb, "_initialized", False), \
+             patch.object(fb, "_init_error", None), \
+             patch("users.firebase_backend._load_credentials", return_value=None):
+            ok, err = fb.ensure_initialized()
+            self.assertFalse(ok)
+            self.assertIn("Firebase no configurado", err)
+
+    def test_verify_id_token_propagates_init_failure(self):
+        from unittest.mock import patch
+        from users.firebase_backend import verify_id_token
+
+        with patch(
+            "users.firebase_backend.ensure_initialized",
+            return_value=(False, "Firebase no configurado: test"),
+        ):
+            decoded, err = verify_id_token("anything")
+            self.assertIsNone(decoded)
+            self.assertIn("Firebase no configurado", err)
+
+    def test_verify_id_token_catches_exception(self):
+        from unittest.mock import patch
+        from users.firebase_backend import verify_id_token
+
+        with patch(
+            "users.firebase_backend.ensure_initialized",
+            return_value=(True, None),
+        ), patch(
+            "users.firebase_backend.firebase_auth.verify_id_token",
+            side_effect=ValueError("token expired"),
+        ):
+            decoded, err = verify_id_token("bad-token")
+            self.assertIsNone(decoded)
+            self.assertIn("ValueError", err)
+
+    def test_verify_id_token_success(self):
+        from unittest.mock import patch
+        from users.firebase_backend import verify_id_token
+
+        with patch(
+            "users.firebase_backend.ensure_initialized",
+            return_value=(True, None),
+        ), patch(
+            "users.firebase_backend.firebase_auth.verify_id_token",
+            return_value={"uid": "abc", "email": "test@firebase.com"},
+        ):
+            decoded, err = verify_id_token("valid")
+            self.assertIsNone(err)
+            self.assertEqual(decoded["uid"], "abc")
+
+
 class AnalyzeCarPhotoTests(APITestCase):
     def _photo(self):
         from PIL import Image
