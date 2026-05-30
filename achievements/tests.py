@@ -2401,3 +2401,89 @@ class AnalyzePhotoGlobalCatalogTests(APITestCase):
             for c in user_content
         )
         self.assertTrue(has_ref)
+
+
+class JwtAuthMiddlewareTests(APITestCase):
+    def setUp(self):
+        self.user = _make_user(username="wsuser", email="ws@test.com")
+
+    def _run(self, query_string):
+        from asgiref.sync import async_to_sync
+        from achievements.auth import JwtAuthMiddlewareStack
+
+        captured = {}
+
+        async def fake_inner(scope, receive, send):
+            captured["scope"] = scope
+
+        mw = JwtAuthMiddlewareStack(fake_inner)
+        scope = {"query_string": query_string}
+        async_to_sync(mw)(scope, None, None)
+        return captured["scope"]
+
+    def test_valid_token_sets_user(self):
+        from rest_framework_simplejwt.tokens import AccessToken
+
+        token = str(AccessToken.for_user(self.user))
+        scope = self._run(f"token={token}".encode())
+        self.assertEqual(scope["user"].id, self.user.id)
+
+    def test_no_token_is_anonymous(self):
+        from django.contrib.auth.models import AnonymousUser
+
+        scope = self._run(b"")
+        self.assertIsInstance(scope["user"], AnonymousUser)
+
+    def test_invalid_token_is_anonymous(self):
+        from django.contrib.auth.models import AnonymousUser
+
+        scope = self._run(b"token=garbage-not-a-jwt")
+        self.assertIsInstance(scope["user"], AnonymousUser)
+
+    def test_token_for_deleted_user_is_anonymous(self):
+        from django.contrib.auth.models import AnonymousUser
+        from rest_framework_simplejwt.tokens import AccessToken
+
+        token = str(AccessToken.for_user(self.user))
+        self.user.delete()
+        scope = self._run(f"token={token}".encode())
+        self.assertIsInstance(scope["user"], AnonymousUser)
+
+
+class OpenAIClientTests(APITestCase):
+    def tearDown(self):
+        from badgeup.openai_client import get_openai_client
+
+        get_openai_client.cache_clear()
+
+    def test_raises_when_no_api_key(self):
+        from django.test import override_settings
+        from badgeup.openai_client import get_openai_client
+
+        get_openai_client.cache_clear()
+        with override_settings(OPENAI_API_KEY=""):
+            with self.assertRaises(RuntimeError):
+                get_openai_client()
+
+    def test_returns_client_when_key_present(self):
+        from unittest.mock import patch
+        from django.test import override_settings
+        import badgeup.openai_client as oc
+
+        oc.get_openai_client.cache_clear()
+        with override_settings(OPENAI_API_KEY="sk-test-key"), \
+             patch.object(oc, "OpenAI", return_value="fake-client") as mock_openai:
+            client = oc.get_openai_client()
+        self.assertEqual(client, "fake-client")
+        mock_openai.assert_called_once_with(api_key="sk-test-key")
+
+    def test_raises_when_sdk_missing(self):
+        from unittest.mock import patch
+        from django.test import override_settings
+        import badgeup.openai_client as oc
+
+        oc.get_openai_client.cache_clear()
+        with override_settings(OPENAI_API_KEY="sk-test-key"), \
+             patch.object(oc, "OpenAI", None):
+            with self.assertRaises(RuntimeError):
+                oc.get_openai_client()
