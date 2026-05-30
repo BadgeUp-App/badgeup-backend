@@ -772,6 +772,212 @@ class ImagePayloadTests(APITestCase):
         self.assertIsNone(_sticker_reference_payload(self.sticker))
 
 
+class StickerUnlockViewTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, Sticker
+
+        self.user = _make_user(username="unl", email="unl@test.com")
+        self.album = Album.objects.create(title="UnlAlb", theme="t", description="d")
+        self.sticker = Sticker.objects.create(album=self.album, name="unlsticker")
+
+    def _payload(self):
+        return {"photo_url": "https://example.com/photo.jpg"}
+
+    def test_unlock_creates_user_sticker_validating(self):
+        from unittest.mock import patch
+        from achievements.models import UserSticker
+
+        self.client.force_authenticate(self.user)
+        with patch("achievements.views.validate_user_sticker.delay"):
+            resp = self.client.post(
+                reverse("sticker-unlock", args=[self.sticker.id]),
+                self._payload(),
+                format="json",
+            )
+        self.assertIn(resp.status_code, (status.HTTP_201_CREATED, status.HTTP_202_ACCEPTED))
+        us = UserSticker.objects.get(user=self.user, sticker=self.sticker)
+        self.assertEqual(us.status, UserSticker.STATUS_VALIDATING)
+        self.assertFalse(us.validated)
+
+    def test_unlock_existing_user_sticker_uses_202(self):
+        from unittest.mock import patch
+        from achievements.models import UserSticker
+
+        UserSticker.objects.create(
+            user=self.user, sticker=self.sticker, status=UserSticker.STATUS_APPROVED
+        )
+        self.client.force_authenticate(self.user)
+        with patch("achievements.views.validate_user_sticker.delay"):
+            resp = self.client.post(
+                reverse("sticker-unlock", args=[self.sticker.id]),
+                self._payload(),
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_202_ACCEPTED)
+
+    def test_unlock_falls_back_when_celery_unavailable(self):
+        from unittest.mock import patch
+
+        self.client.force_authenticate(self.user)
+        with patch(
+            "achievements.views.validate_user_sticker.delay",
+            side_effect=RuntimeError("broker unavailable"),
+        ), patch("achievements.views.validate_user_sticker.apply") as mocked_apply:
+            resp = self.client.post(
+                reverse("sticker-unlock", args=[self.sticker.id]),
+                self._payload(),
+                format="json",
+            )
+        self.assertIn(resp.status_code, (status.HTTP_201_CREATED, status.HTTP_202_ACCEPTED))
+        mocked_apply.assert_called_once()
+
+    def test_unlock_404_for_missing_sticker(self):
+        self.client.force_authenticate(self.user)
+        resp = self.client.post(
+            reverse("sticker-unlock", args=[99999]),
+            self._payload(),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_unlock_requires_auth(self):
+        resp = self.client.post(
+            reverse("sticker-unlock", args=[self.sticker.id]),
+            self._payload(),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_unlock_without_photo_or_url_returns_400(self):
+        from unittest.mock import patch
+
+        self.client.force_authenticate(self.user)
+        with patch("achievements.views.validate_user_sticker.delay"):
+            resp = self.client.post(
+                reverse("sticker-unlock", args=[self.sticker.id]),
+                {},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class MemberListViewTests(APITestCase):
+    def setUp(self):
+        self.me = _make_user(username="me", email="me@test.com")
+        self.friend = _make_user(username="fr", email="fr@test.com")
+        self.pending_in = _make_user(username="pi", email="pi@test.com")
+        self.pending_out = _make_user(username="po", email="po@test.com")
+        self.stranger = _make_user(username="st", email="st@test.com")
+        self.staff = _make_user(username="sf", email="sf@test.com", is_staff=True)
+        _be_friends(self.me, self.friend)
+        FriendRequest.objects.create(from_user=self.pending_in, to_user=self.me)
+        FriendRequest.objects.create(from_user=self.me, to_user=self.pending_out)
+
+    def test_members_list_excludes_self_and_staff(self):
+        self.client.force_authenticate(self.me)
+        resp = self.client.get(reverse("friends-members"))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        usernames = {u["username"] for u in resp.data}
+        self.assertNotIn(self.me.username, usernames)
+        self.assertNotIn(self.staff.username, usernames)
+        self.assertIn(self.stranger.username, usernames)
+
+    def test_members_list_includes_friend_status(self):
+        self.client.force_authenticate(self.me)
+        resp = self.client.get(reverse("friends-members"))
+        friend_entry = next(u for u in resp.data if u["username"] == self.friend.username)
+        self.assertEqual(friend_entry["relationship_status"], "friends")
+
+    def test_members_list_includes_request_received(self):
+        self.client.force_authenticate(self.me)
+        resp = self.client.get(reverse("friends-members"))
+        entry = next(u for u in resp.data if u["username"] == self.pending_in.username)
+        self.assertEqual(entry["relationship_status"], "request_received")
+
+    def test_members_list_includes_request_sent(self):
+        self.client.force_authenticate(self.me)
+        resp = self.client.get(reverse("friends-members"))
+        entry = next(u for u in resp.data if u["username"] == self.pending_out.username)
+        self.assertEqual(entry["relationship_status"], "request_sent")
+
+    def test_members_list_stranger_no_relationship(self):
+        self.client.force_authenticate(self.me)
+        resp = self.client.get(reverse("friends-members"))
+        entry = next(u for u in resp.data if u["username"] == self.stranger.username)
+        self.assertEqual(entry["relationship_status"], "none")
+
+
+class ChatMessagePermissionTests(APITestCase):
+    def setUp(self):
+        self.alice = _make_user(username="alc", email="alc@test.com")
+        self.bob = _make_user(username="bbb", email="bbb@test.com")
+        self.eve = _make_user(username="evb", email="evb@test.com")
+        _be_friends(self.alice, self.bob)
+
+    def test_strangers_cannot_send_message(self):
+        self.client.force_authenticate(self.alice)
+        resp = self.client.post(
+            reverse("chat-messages", args=[self.eve.id]),
+            {"text": "ola"},
+            format="json",
+        )
+        self.assertIn(resp.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_400_BAD_REQUEST))
+
+    def test_friends_can_send_message_with_channel_layer_failure(self):
+        from unittest.mock import patch
+        from achievements.models import ChatMessage
+
+        self.client.force_authenticate(self.alice)
+        with patch("achievements.views.get_channel_layer", return_value=None), \
+             patch("users.push.send_push"):
+            resp = self.client.post(
+                reverse("chat-messages", args=[self.bob.id]),
+                {"text": "ola desde alice"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(
+            ChatMessage.objects.filter(
+                sender=self.alice, recipient=self.bob, text="ola desde alice"
+            ).exists()
+        )
+
+    def test_friends_message_with_channel_layer_exception_still_creates(self):
+        from unittest.mock import patch, MagicMock
+        from achievements.models import ChatMessage
+
+        bad_layer = MagicMock()
+        bad_layer.group_send.side_effect = RuntimeError("redis down")
+        self.client.force_authenticate(self.alice)
+        with patch("achievements.views.get_channel_layer", return_value=bad_layer), \
+             patch("users.push.send_push"):
+            resp = self.client.post(
+                reverse("chat-messages", args=[self.bob.id]),
+                {"text": "robust"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(
+            ChatMessage.objects.filter(
+                sender=self.alice, recipient=self.bob, text="robust"
+            ).exists()
+        )
+
+    def test_self_chat_allowed(self):
+        from unittest.mock import patch
+        from achievements.models import ChatMessage
+
+        self.client.force_authenticate(self.alice)
+        with patch("achievements.views.get_channel_layer", return_value=None), \
+             patch("users.push.send_push"):
+            resp = self.client.post(
+                reverse("chat-messages", args=[self.alice.id]),
+                {"text": "nota personal"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+
 class AnalyzePhotoGlobalCatalogTests(APITestCase):
     def _fake_image_bytes(self):
         from PIL import Image
