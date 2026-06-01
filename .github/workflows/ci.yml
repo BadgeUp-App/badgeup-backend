@@ -15,6 +15,7 @@ jobs:
       DJANGO_SECRET_KEY: ci-test-secret-key-not-for-prod
       DATABASE_URL: "sqlite:///test.sqlite3"
       DATABASE_FALLBACK: "true"
+      OPENAI_API_KEY: "sk-ci-test-dummy-not-real"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
