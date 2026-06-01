@@ -1957,3 +1957,59 @@ class SeedCarrosDeFerCommandTests(APITestCase):
         call_command("seed_carros_de_fer", "--reset", stdout=StringIO())
         new_id = Album.objects.get(title="Carros de Fer").id
         self.assertNotEqual(first_id, new_id)
+
+
+class WipeCatalogCommandTests(APITestCase):
+    def setUp(self):
+        from albums.models import Album, Sticker, ScanLog
+        from achievements.models import UserSticker, CapturePhoto
+
+        self.user = User.objects.create_user(
+            username="wipeu", email="wipe@test.com", password="S3curePass!2026"
+        )
+        self.album = Album.objects.create(title="ToWipe", theme="t", description="d")
+        self.sticker = Sticker.objects.create(album=self.album, name="ws", reward_points=10)
+        self.us = UserSticker.objects.create(
+            user=self.user, sticker=self.sticker, status=UserSticker.STATUS_APPROVED
+        )
+        CapturePhoto.objects.create(user_sticker=self.us)
+        ScanLog.objects.create(user=self.user, detected_items="x")
+
+    def test_dry_run_deletes_nothing(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from albums.models import Album
+
+        out = StringIO()
+        call_command("wipe_catalog", stdout=out)
+        self.assertIn("DRY-RUN", out.getvalue())
+        self.assertEqual(Album.objects.count(), 1)
+
+    def test_confirm_wipes_everything(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from albums.models import Album, Sticker, ScanLog
+        from achievements.models import UserSticker, CapturePhoto
+
+        call_command("wipe_catalog", "--confirm", "--keep-files", stdout=StringIO())
+        self.assertEqual(Album.objects.count(), 0)
+        self.assertEqual(Sticker.objects.count(), 0)
+        self.assertEqual(UserSticker.objects.count(), 0)
+        self.assertEqual(CapturePhoto.objects.count(), 0)
+        self.assertEqual(ScanLog.objects.count(), 0)
+
+    def test_confirm_reports_counts(self):
+        from io import StringIO
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command("wipe_catalog", "--confirm", "--keep-files", stdout=out)
+        self.assertIn("Borrado completo", out.getvalue())
+
+    def test_keep_files_skips_storage_deletion(self):
+        from io import StringIO
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command("wipe_catalog", "--confirm", "--keep-files", stdout=out)
+        self.assertIn("eliminados: 0", out.getvalue())
