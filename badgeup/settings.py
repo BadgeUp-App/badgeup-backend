@@ -220,6 +220,17 @@ REST_FRAMEWORK = {
     },
 }
 
+# Cache que usa el throttling de DRF. LocMemCache = por proceso: cada worker de
+# gunicorn lleva su propio contador, asi que el limite efectivo es
+# N_workers x rate. Decision consciente: Render no corre Redis y no se justifica
+# todavia. Para hacerlo global a futuro: Redis, o DatabaseCache (createcachetable).
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "badgeup-locmem",
+    }
+}
+
 
 _cors_origins = env_list("CORS_ALLOWED_ORIGINS")
 if _cors_origins:

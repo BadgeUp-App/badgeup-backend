@@ -35,6 +35,28 @@ class SentryInitTests(SimpleTestCase):
             self.assertFalse(kwargs["send_default_pii"])
 
 
+class LoginThrottleBehaviorTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_login_returns_429_after_exceeding_rate(self):
+        from django.conf import settings as dj_settings
+
+        rates = dj_settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
+        limit = int(rates["login"].split("/")[0])
+        url = reverse("auth-login")
+        payload = {"username": "nadie", "password": "malisima"}
+        codes = [
+            self.client.post(url, payload, format="json").status_code
+            for _ in range(limit + 1)
+        ]
+        self.assertNotIn(status.HTTP_429_TOO_MANY_REQUESTS, codes[:limit])
+        self.assertEqual(codes[limit], status.HTTP_429_TOO_MANY_REQUESTS)
+
+
 class RegisterTests(APITestCase):
     def setUp(self):
         cache.clear()
