@@ -24,3 +24,22 @@ SELECT
 FROM pg_tables
 WHERE schemaname = 'public'
 ORDER BY tablename;
+
+
+-- ============================================================================
+-- PARTE 2 (OPCIONAL) - Solo si corriste la seccion de REVOKE en enable_rls.sql
+-- ============================================================================
+-- Restaura los grants estandar de Supabase. OJO: con RLS deshabilitado + grants
+-- restaurados vuelves al estado inseguro original. Usar solo para diagnosticar.
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon';
+        EXECUTE 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon';
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+        EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated';
+        EXECUTE 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated';
+    END IF;
+END $$;

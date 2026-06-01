@@ -13,6 +13,10 @@
 --   Django sigue funcionando porque su DATABASE_URL usa el postgres user
 --   que tiene BYPASSRLS automaticamente.
 --
+--   IMPORTANTE: re-correr este script despues de cualquier migracion que
+--   agregue tablas nuevas. RLS (y los REVOKE de la Parte 2) solo cubren las
+--   tablas que existen al momento de correrlo.
+--
 -- Como correr:
 --   1. Supabase Dashboard > SQL Editor > New query
 --   2. Pegar este archivo completo
@@ -48,3 +52,28 @@ SELECT
 FROM pg_tables
 WHERE schemaname = 'public'
 ORDER BY tablename;
+
+
+-- ============================================================================
+-- PARTE 2 (OPCIONAL) - Defensa en profundidad
+-- ============================================================================
+-- RLS sin policies ya bloquea a anon/authenticated. Esto es belt-and-suspenders:
+-- ademas quita los GRANT de los roles del API REST de Supabase (anon,
+-- authenticated), porque las tablas Django no se exponen por PostgREST.
+-- Es seguro: Django usa su propio rol (el de DATABASE_URL), no estos.
+-- Si prefieres lo minimo, no corras esta seccion (revertible con la Parte 2
+-- de enable_rls_revert.sql).
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        EXECUTE 'REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon';
+        EXECUTE 'REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon';
+        RAISE NOTICE 'grants revocados a anon';
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+        EXECUTE 'REVOKE ALL ON ALL TABLES IN SCHEMA public FROM authenticated';
+        EXECUTE 'REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM authenticated';
+        RAISE NOTICE 'grants revocados a authenticated';
+    END IF;
+END $$;
