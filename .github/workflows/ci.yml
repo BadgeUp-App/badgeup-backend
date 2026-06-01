@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      DJANGO_SETTINGS_MODULE: badgeup.settings
+      DJANGO_DEBUG: "True"
+      DJANGO_ALLOWED_HOSTS: "*"
+      DJANGO_SECRET_KEY: ci-test-secret-key-not-for-prod
+      DATABASE_URL: "sqlite:///test.sqlite3"
+      DATABASE_FALLBACK: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run migrations check
+        run: python manage.py makemigrations --check --dry-run
+      - name: Run tests with coverage
+        run: |
+          coverage run manage.py test albums.tests achievements.tests users.tests
+          coverage report
