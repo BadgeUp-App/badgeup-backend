@@ -1824,56 +1824,56 @@ class ChatMessagePermissionTests(APITestCase):
             )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
 
+class NotificationsConsumerTests(APITestCase):
+    def _token(self, user):
+        from rest_framework_simplejwt.tokens import AccessToken
 
-class ChatRoomNameTests(APITestCase):
-    def test_chat_room_name_is_order_independent(self):
-        from achievements.consumers import chat_room_name
+        return str(AccessToken.for_user(user))
 
-        self.assertEqual(chat_room_name(1, 2), chat_room_name(2, 1))
-        self.assertEqual(chat_room_name(5, 5), "chat_5_5")
-
-    def test_chat_room_name_format(self):
-        from achievements.consumers import chat_room_name
-
-        self.assertEqual(chat_room_name(10, 3), "chat_3_10")
-
-
-class ChatConsumerTests(APITestCase):
     def setUp(self):
-        self.alice = _make_user(username="ca", email="ca@test.com")
-        self.bob = _make_user(username="cb", email="cb@test.com")
-        self.eve = _make_user(username="ce", email="ce@test.com")
-        _be_friends(self.alice, self.bob)
+        self.alice = _make_user(username="wsnalice", email="wsna@test.com")
 
-    def test_consumer_connects_when_friend(self):
-        import asyncio
-        from unittest.mock import AsyncMock
-        from achievements.consumers import ChatConsumer
+    async def test_authenticated_connects(self):
+        from channels.testing import WebsocketCommunicator
+        from badgeup.asgi import application
 
-        async def runner():
-            c = ChatConsumer()
-            c.scope = {
-                "user": self.alice,
-                "url_route": {"kwargs": {"other_id": str(self.bob.id)}},
-            }
-            c.channel_name = "chan-1"
-            c.channel_layer = AsyncMock()
-            c.accept = AsyncMock()
-            c.close = AsyncMock()
+        token = await sync_to_async(self._token)(self.alice)
+        communicator = WebsocketCommunicator(
+            application, f"/ws/notifications/?token={token}"
+        )
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        await communicator.disconnect()
 
-            async def fake_is_friend(*args, **kwargs):
-                return True
+    async def test_unauthenticated_rejected(self):
+        from channels.testing import WebsocketCommunicator
+        from badgeup.asgi import application
 
-            c._is_friend = fake_is_friend
-            await c.connect()
-            c.accept.assert_called_once()
-            c.close.assert_not_called()
+        communicator = WebsocketCommunicator(application, "/ws/notifications/")
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+        await communicator.disconnect()
 
-        asyncio.run(runner())
+    async def test_receives_broadcast_notification(self):
+        from channels.testing import WebsocketCommunicator
+        from channels.layers import get_channel_layer
+        from badgeup.asgi import application
 
-    def test_consumer_rejects_when_not_friend(self):
-        import asyncio
-        from unittest.mock import AsyncMock
+        token = await sync_to_async(self._token)(self.alice)
+        communicator = WebsocketCommunicator(
+            application, f"/ws/notifications/?token={token}"
+        )
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        layer = get_channel_layer()
+        await layer.group_send(
+            f"user_{self.alice.id}",
+            {"type": "notification", "payload": {"title": "Hola", "message": "test"}},
+        )
+        response = await communicator.receive_json_from(timeout=5)
+        self.assertEqual(response["type"], "notification")
+        self.assertEqual(response["title"], "Hola")
+        await communicator.disconnect()
         from achievements.consumers import ChatConsumer
 
         async def runner():
