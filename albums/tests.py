@@ -1957,3 +1957,148 @@ class SeedCarrosDeFerCommandTests(APITestCase):
         call_command("seed_carros_de_fer", "--reset", stdout=StringIO())
         new_id = Album.objects.get(title="Carros de Fer").id
         self.assertNotEqual(first_id, new_id)
+
+
+class GlobalScanConsumerTests(APITestCase):
+    def _token(self, user):
+        from rest_framework_simplejwt.tokens import AccessToken
+
+        return str(AccessToken.for_user(user))
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="wsg", email="wsg@test.com", password="S3curePass!2026"
+        )
+
+    async def _connect(self):
+        from asgiref.sync import sync_to_async
+        from channels.testing import WebsocketCommunicator
+        from badgeup.asgi import application
+
+        token = await sync_to_async(self._token)(self.user)
+        communicator = WebsocketCommunicator(application, f"/ws/scans/?token={token}")
+        connected, _ = await communicator.connect()
+        return communicator, connected
+
+    async def test_authenticated_connects_and_pings(self):
+        communicator, connected = await self._connect()
+        self.assertTrue(connected)
+        await communicator.send_json_to({"action": "ping"})
+        resp = await communicator.receive_json_from(timeout=5)
+        self.assertEqual(resp["type"], "pong")
+        await communicator.disconnect()
+
+    async def test_unknown_action_returns_error(self):
+        communicator, connected = await self._connect()
+        self.assertTrue(connected)
+        await communicator.send_json_to({"action": "nonsense"})
+        resp = await communicator.receive_json_from(timeout=5)
+        self.assertEqual(resp["type"], "error")
+        await communicator.disconnect()
+
+    async def test_unauthenticated_rejected(self):
+        from channels.testing import WebsocketCommunicator
+        from badgeup.asgi import application
+
+        communicator = WebsocketCommunicator(application, "/ws/scans/")
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+        await communicator.disconnect()
+
+    async def test_scan_event_broadcast(self):
+        from channels.layers import get_channel_layer
+
+        communicator, connected = await self._connect()
+        self.assertTrue(connected)
+        layer = get_channel_layer()
+        await layer.group_send(
+            "global_scans",
+            {"type": "scan.event", "payload": {"sticker_id": 5, "username": "wsg"}},
+        )
+        resp = await communicator.receive_json_from(timeout=5)
+        self.assertEqual(resp["type"], "scan_event")
+        self.assertEqual(resp["sticker_id"], 5)
+        await communicator.disconnect()
+
+
+class AlbumScanConsumerTests(APITestCase):
+    def _token(self, user):
+        from rest_framework_simplejwt.tokens import AccessToken
+
+        return str(AccessToken.for_user(user))
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="wsa2", email="wsa2@test.com", password="S3curePass!2026"
+        )
+
+    async def _connect(self):
+        from asgiref.sync import sync_to_async
+        from channels.testing import WebsocketCommunicator
+        from badgeup.asgi import application
+
+        token = await sync_to_async(self._token)(self.user)
+        communicator = WebsocketCommunicator(
+            application, f"/ws/scans/album/?token={token}"
+        )
+        connected, _ = await communicator.connect()
+        return communicator, connected
+
+    async def test_ping(self):
+        communicator, connected = await self._connect()
+        self.assertTrue(connected)
+        await communicator.send_json_to({"action": "ping"})
+        resp = await communicator.receive_json_from(timeout=5)
+        self.assertEqual(resp["type"], "pong")
+        await communicator.disconnect()
+
+    async def test_subscribe_album(self):
+        communicator, connected = await self._connect()
+        self.assertTrue(connected)
+        await communicator.send_json_to({"action": "subscribe_album", "album_id": 3})
+        resp = await communicator.receive_json_from(timeout=5)
+        self.assertEqual(resp["type"], "subscribed")
+        self.assertEqual(resp["album_id"], 3)
+        await communicator.disconnect()
+
+    async def test_subscribe_album_without_id_noop(self):
+        communicator, connected = await self._connect()
+        self.assertTrue(connected)
+        await communicator.send_json_to({"action": "subscribe_album"})
+        self.assertTrue(await communicator.receive_nothing(timeout=1))
+        await communicator.disconnect()
+
+    async def test_scan_update_broadcasts_and_acks(self):
+        communicator, connected = await self._connect()
+        self.assertTrue(connected)
+        await communicator.send_json_to(
+            {"action": "scan_update", "sticker_id": 9, "scan_status": "captured"}
+        )
+        resp = await communicator.receive_json_from(timeout=5)
+        self.assertEqual(resp["type"], "scan_ack")
+        self.assertEqual(resp["sticker_id"], 9)
+        await communicator.disconnect()
+
+    async def test_scan_update_without_sticker_id_noop(self):
+        communicator, connected = await self._connect()
+        self.assertTrue(connected)
+        await communicator.send_json_to({"action": "scan_update"})
+        self.assertTrue(await communicator.receive_nothing(timeout=1))
+        await communicator.disconnect()
+
+    async def test_unknown_action_returns_error(self):
+        communicator, connected = await self._connect()
+        self.assertTrue(connected)
+        await communicator.send_json_to({"action": "weird"})
+        resp = await communicator.receive_json_from(timeout=5)
+        self.assertEqual(resp["type"], "error")
+        await communicator.disconnect()
+
+    async def test_unauthenticated_rejected(self):
+        from channels.testing import WebsocketCommunicator
+        from badgeup.asgi import application
+
+        communicator = WebsocketCommunicator(application, "/ws/scans/album/")
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+        await communicator.disconnect()
