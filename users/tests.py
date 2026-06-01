@@ -1,10 +1,38 @@
+import os
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.test import SimpleTestCase
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
 User = get_user_model()
+
+
+class SentryInitTests(SimpleTestCase):
+    def test_no_dsn_returns_false(self):
+        from badgeup.observability import init_sentry
+
+        with mock.patch.dict(os.environ, {"SENTRY_DSN": ""}, clear=False):
+            self.assertFalse(init_sentry())
+
+    def test_dsn_initializes_sentry_once(self):
+        from badgeup.observability import init_sentry
+
+        env = {
+            "SENTRY_DSN": "https://abc@o0.ingest.sentry.io/1",
+            "SENTRY_ENVIRONMENT": "ci",
+        }
+        with mock.patch.dict(os.environ, env, clear=False), \
+                mock.patch("sentry_sdk.init") as m_init:
+            self.assertTrue(init_sentry())
+            m_init.assert_called_once()
+            kwargs = m_init.call_args.kwargs
+            self.assertEqual(kwargs["dsn"], env["SENTRY_DSN"])
+            self.assertEqual(kwargs["environment"], "ci")
+            self.assertFalse(kwargs["send_default_pii"])
 
 
 class RegisterTests(APITestCase):
