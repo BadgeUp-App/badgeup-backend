@@ -44,17 +44,15 @@ services:
         value: "https://badgeup-backend.onrender.com"
       - key: DEFAULT_FROM_EMAIL
         value: "BadgeUp <ferchavez2027@gmail.com>"
-      - key: SENTRY_ENVIRONMENT
+      - key: AROA_ERRORS_KEY
+        value: "aroa_err_23521f394df7795304e25e0608b489bb"
+      - key: AROA_ERRORS_ENVIRONMENT
         value: production
-      - key: SENTRY_TRACES_SAMPLE_RATE
-        value: "0.0"
       - key: DJANGO_SECRET_KEY
         generateValue: true
       - key: DATABASE_URL
         sync: false
       - key: OPENAI_API_KEY
-        sync: false
-      - key: SENTRY_DSN
         sync: false
       - key: GOOGLE_CLIENT_ID
         sync: false

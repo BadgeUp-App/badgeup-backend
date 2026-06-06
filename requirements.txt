@@ -21,4 +21,3 @@ daphne==4.1.2
 uvicorn[standard]==0.30.0
 firebase-admin==6.5.0
 coverage==7.6.1
-sentry-sdk==2.61.0

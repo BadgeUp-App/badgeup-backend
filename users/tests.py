@@ -11,28 +11,40 @@ from rest_framework.test import APIClient, APITestCase
 User = get_user_model()
 
 
-class SentryInitTests(SimpleTestCase):
-    def test_no_dsn_returns_false(self):
-        from badgeup.observability import init_sentry
+class AroaErrorsReporterTests(SimpleTestCase):
+    def test_no_key_is_noop(self):
+        from badgeup.aroa_errors import report_error
 
-        with mock.patch.dict(os.environ, {"SENTRY_DSN": ""}, clear=False):
-            self.assertFalse(init_sentry())
+        with mock.patch.dict(os.environ, {"AROA_ERRORS_KEY": ""}, clear=False), \
+                mock.patch("badgeup.aroa_errors.requests.post") as m_post:
+            self.assertFalse(report_error("TypeError", "x is null"))
+            m_post.assert_not_called()
 
-    def test_dsn_initializes_sentry_once(self):
-        from badgeup.observability import init_sentry
+    def test_posts_payload_with_key(self):
+        from badgeup.aroa_errors import report_error
 
-        env = {
-            "SENTRY_DSN": "https://abc@o0.ingest.sentry.io/1",
-            "SENTRY_ENVIRONMENT": "ci",
-        }
+        env = {"AROA_ERRORS_KEY": "aroa_err_test", "AROA_ERRORS_ENVIRONMENT": "test"}
         with mock.patch.dict(os.environ, env, clear=False), \
-                mock.patch("sentry_sdk.init") as m_init:
-            self.assertTrue(init_sentry())
-            m_init.assert_called_once()
-            kwargs = m_init.call_args.kwargs
-            self.assertEqual(kwargs["dsn"], env["SENTRY_DSN"])
-            self.assertEqual(kwargs["environment"], "ci")
-            self.assertFalse(kwargs["send_default_pii"])
+                mock.patch("badgeup.aroa_errors.requests.post") as m_post:
+            self.assertTrue(report_error("ValueError", "boom", level="fatal"))
+            m_post.assert_called_once()
+            kwargs = m_post.call_args.kwargs
+            self.assertEqual(kwargs["headers"]["x-aroa-ingest-key"], "aroa_err_test")
+            body = kwargs["json"]
+            self.assertEqual(body["exception_type"], "ValueError")
+            self.assertEqual(body["level"], "fatal")
+            self.assertEqual(body["environment"], "test")
+            self.assertEqual(body["platform_meta"]["runtime"], "django")
+
+    def test_swallows_post_failure(self):
+        from badgeup.aroa_errors import report_error
+
+        with mock.patch.dict(os.environ, {"AROA_ERRORS_KEY": "k"}, clear=False), \
+                mock.patch(
+                    "badgeup.aroa_errors.requests.post",
+                    side_effect=RuntimeError("net down"),
+                ):
+            self.assertFalse(report_error("E", "m"))
 
 
 class LoginThrottleBehaviorTests(APITestCase):

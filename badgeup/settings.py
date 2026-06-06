@@ -305,7 +305,24 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "BadgeUp <noreply@badgeup.app>")
 
+AROA_ERRORS_KEY = os.getenv("AROA_ERRORS_KEY", "")
 
-from badgeup.observability import init_sentry  # noqa: E402
-
-init_sentry()
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {"class": "logging.StreamHandler"},
+        "aroa_errors": {
+            "class": "badgeup.aroa_errors.AroaErrorsHandler",
+            "level": "ERROR",
+        },
+    },
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        "django.request": {
+            "handlers": ["console", "aroa_errors"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+    },
+}
